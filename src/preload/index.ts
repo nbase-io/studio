@@ -59,8 +59,8 @@ const api = {
     return ipcRenderer.invoke('initialize-download', fileUrl, shouldCleanup)
   },
 
-  downloadAndExtract: (fileUrl: string, targetFolder: string, shouldResume = false): Promise<string> => {
-    return ipcRenderer.invoke('download-and-extract', fileUrl, targetFolder, shouldResume)
+  downloadAndExtract: (fileUrl: string, targetFolder: string): Promise<string> => {
+    return ipcRenderer.invoke('download-and-extract', fileUrl, targetFolder)
   },
 
   cancelDownload: (): Promise<boolean> => {

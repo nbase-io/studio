@@ -9,7 +9,6 @@ import http from 'http'
 import https from 'https'
 import { URL } from 'url'
 import admZip from 'adm-zip'
-import util from 'util'
 
 // ===========================================
 // 전역 상태 관리
@@ -76,18 +75,6 @@ function getDownloadFilePath(fileUrl: string): string {
   return path.join(app.getPath('downloads'), fileName)
 }
 
-// 파일 삭제 함수
-function cleanupDownloadFile(fileUrl: string): void {
-  const filePath = getDownloadFilePath(fileUrl)
-  if (fs.existsSync(filePath)) {
-    try {
-      fs.unlinkSync(filePath)
-    } catch (error) {
-      console.error('파일 삭제 오류:', error)
-    }
-  }
-}
-
 // URL 범위 지원 여부 확인
 async function checkRangeSupport(url: string): Promise<boolean> {
   try {
@@ -111,634 +98,6 @@ async function checkRangeSupport(url: string): Promise<boolean> {
     console.error('범위 지원 확인 오류:', error)
     return false
   }
-}
-
-// 파일 이어받기 가능 여부 확인
-async function checkFileResumable(fileUrl: string): Promise<ResumeCheckResult> {
-  const filePath = getDownloadFilePath(fileUrl)
-
-  // 파일이 존재하지 않으면 이어받기 불가능
-  if (!fs.existsSync(filePath)) {
-    return {
-      canResume: false,
-      filePath,
-      downloadedBytes: 0,
-      totalBytes: 0,
-      reason: '기존 파일이 존재하지 않습니다'
-    }
-  }
-
-  try {
-    // 파일 크기 확인
-    const stats = fs.statSync(filePath)
-    const downloadedBytes = stats.size
-
-    if (downloadedBytes === 0) {
-      return {
-        canResume: false,
-        filePath,
-        downloadedBytes: 0,
-        totalBytes: 0,
-        reason: '이전 다운로드 파일이 비어 있습니다'
-      }
-    }
-
-    // 서버 범위 요청 지원 여부 확인
-    const supportsRange = await checkRangeSupport(fileUrl)
-    if (!supportsRange) {
-      return {
-        canResume: false,
-        filePath,
-        downloadedBytes,
-        totalBytes: 0,
-        reason: '서버가 범위 요청을 지원하지 않습니다'
-      }
-    }
-
-    // HEAD 요청으로 파일 총 크기 확인
-    const controller = new AbortController()
-    const signal = controller.signal
-
-    const response = await fetch(fileUrl, {
-      method: 'HEAD',
-      signal
-    })
-
-    setTimeout(() => controller.abort(), 5000) // 5초 타임아웃
-
-    if (!response.ok) {
-      return {
-        canResume: false,
-        filePath,
-        downloadedBytes,
-        totalBytes: 0,
-        reason: `서버 응답 오류: ${response.status} ${response.statusText}`
-      }
-    }
-
-    const contentLength = response.headers.get('Content-Length')
-    const totalBytes = contentLength ? parseInt(contentLength, 10) : 0
-
-    // 이미 완전히 다운로드된 파일인지 확인
-    if (totalBytes > 0 && downloadedBytes >= totalBytes) {
-      return {
-        canResume: false,
-        filePath,
-        downloadedBytes,
-        totalBytes,
-        reason: '파일이 이미 완전히 다운로드되었습니다'
-      }
-    }
-
-    return {
-      canResume: true,
-      filePath,
-      downloadedBytes,
-      totalBytes,
-      reason: '이어받기 가능'
-    }
-  } catch (error) {
-    console.error('이어받기 확인 오류:', error)
-    return {
-      canResume: false,
-      filePath,
-      downloadedBytes: 0,
-      totalBytes: 0,
-      reason: `오류 발생: ${error instanceof Error ? error.message : String(error)}`
-    }
-  }
-}
-
-// 파일 다운로드 함수
-function downloadFile(
-  fileUrl: string,
-  filePath: string,
-  mainWindow: BrowserWindow
-): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    try {
-      // 다운로드 상태 초기화
-      resetDownloadState()
-      downloadState.isInProgress = true
-      downloadState.startTime = Date.now()
-      downloadState.abortController = new AbortController()
-
-      console.log(`다운로드 시작: ${fileUrl}`)
-
-      // 폴더 경로 확인 및 생성
-      const directory = path.dirname(filePath)
-      if (!fs.existsSync(directory)) {
-        fs.mkdirSync(directory, { recursive: true })
-      }
-
-      // 리다이렉션을 따라가는 함수
-      const followRedirects = (url: string, redirectCount = 0): void => {
-        if (redirectCount > 5) {
-          return reject(new Error(`너무 많은 리다이렉션 발생 (주소: ${url})`))
-        }
-
-        const parsedUrl = new URL(url)
-        const options: http.RequestOptions = {
-          method: 'GET',
-          hostname: parsedUrl.hostname,
-          path: parsedUrl.pathname + parsedUrl.search,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 Electron Downloader'
-          },
-          timeout: 30000 // 30초 타임아웃
-        }
-
-        const protocol = parsedUrl.protocol === 'https:' ? https : http
-        const request = protocol.request(options, (response) => {
-          downloadState.response = response
-
-          // 리다이렉션 확인 (300번대 응답)
-          if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400) {
-            const location = response.headers.location
-
-            if (!location) {
-              return reject(new Error(`리다이렉션 응답(${response.statusCode})에 Location 헤더가 없습니다 (주소: ${url})`))
-            }
-
-            // 리다이렉션 URL이 상대 경로인 경우 절대 경로로 변환
-            const redirectUrl = /^https?:\/\//i.test(location)
-              ? location
-              : new URL(location, parsedUrl.origin).href
-
-            console.log(`리다이렉션 발생: ${url} -> ${redirectUrl}`)
-
-            // 연결 정리
-            response.destroy()
-
-            // 새 URL로 재귀적으로 리다이렉션 처리
-            return followRedirects(redirectUrl, redirectCount + 1)
-          }
-
-          // 성공 응답 코드 확인
-          if (response.statusCode !== 200) {
-            downloadState.isInProgress = false
-            return reject(new Error(`다운로드 실패: 서버 응답 ${response.statusCode}\n주소: ${url}`))
-          }
-
-          // Content-Length 확인
-          const contentLength = response.headers['content-length']
-          const totalBytes = contentLength ? parseInt(contentLength, 10) : 0
-
-          // 파일 스트림 설정
-          const writeStream = fs.createWriteStream(filePath)
-          downloadState.writeStream = writeStream
-
-          // 스트림 오류 처리
-          writeStream.on('error', (error) => {
-            downloadState.isInProgress = false
-            reject(new Error(`파일 쓰기 오류: ${error.message}`))
-          })
-
-          // 데이터 처리
-          response.on('data', (chunk) => {
-            if (downloadState.isCancelled) {
-              response.destroy()
-              writeStream.close()
-              return resolve(false)
-            }
-
-            downloadState.downloadedChunks.push(chunk.length)
-            if (downloadState.downloadedChunks.length > 100) {
-              downloadState.downloadedChunks.shift()
-            }
-
-            // 진행 상황 업데이트 (1초에 한 번)
-            const now = Date.now()
-            const elapsedMs = now - downloadState.lastProgressUpdate
-
-            if (elapsedMs >= 1000) {
-              // 이동 평균을 사용하여 다운로드 속도 계산
-              const recentChunks = downloadState.downloadedChunks.slice(-10)
-              const bytesInLastSecond = recentChunks.reduce((sum, size) => sum + size, 0)
-              const bytesPerSecond = elapsedMs > 0 ? (bytesInLastSecond * 1000) / Math.min(elapsedMs, 10000) : 0
-
-              const transferredBytes = writeStream.bytesWritten
-              const percent = totalBytes > 0 ? (transferredBytes / totalBytes) * 100 : 0
-
-              const remaining = bytesPerSecond > 0
-                ? Math.round((totalBytes - transferredBytes) / bytesPerSecond)
-                : 0
-
-              mainWindow.webContents.send('download-progress', {
-                percent,
-                transferredBytes,
-                totalBytes,
-                bytesPerSecond,
-                remaining
-              })
-
-              downloadState.lastProgressUpdate = now
-            }
-          })
-
-          // 오류 처리
-          response.on('error', (error) => {
-            writeStream.close()
-            downloadState.isInProgress = false
-            reject(new Error(`다운로드 중 오류 발생: ${error.message}`))
-          })
-
-          // 완료 처리
-          response.on('end', () => {
-            writeStream.end(() => {
-              if (!downloadState.isCancelled) {
-                downloadState.isInProgress = false
-                resolve(true)
-              } else {
-                resolve(false)
-              }
-            })
-          })
-
-          // 응답 파이프
-          response.pipe(writeStream)
-        })
-
-        // 요청 오류
-        request.on('error', (error) => {
-          downloadState.isInProgress = false
-          reject(new Error(`다운로드 요청 실패 (주소: ${url}): ${error.message}`))
-        })
-
-        // 요청 종료
-        request.end()
-      }
-
-      // 리다이렉션 처리 시작
-      followRedirects(fileUrl)
-    } catch (error) {
-      downloadState.isInProgress = false
-      reject(new Error(`다운로드 처리 오류 (주소: ${fileUrl}): ${error instanceof Error ? error.message : String(error)}`))
-    }
-  })
-}
-
-// 이어받기 함수
-function resumeDownload(
-  fileUrl: string,
-  filePath: string,
-  startPosition: number,
-  mainWindow: BrowserWindow
-): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    try {
-      // 다운로드 상태 초기화
-      resetDownloadState()
-      downloadState.isInProgress = true
-      downloadState.startTime = Date.now()
-      downloadState.resumePosition = startPosition
-      downloadState.abortController = new AbortController()
-
-      console.log(`이어받기 시작: ${fileUrl}, 위치: ${startPosition}`)
-
-      // 리다이렉션을 따라가는 함수
-      const followRedirects = (url: string, redirectCount = 0): void => {
-        if (redirectCount > 5) {
-          return reject(new Error(`너무 많은 리다이렉션 발생 (주소: ${fileUrl})`))
-        }
-
-        const parsedUrl = new URL(url)
-        const options: http.RequestOptions = {
-          method: 'GET',
-          hostname: parsedUrl.hostname,
-          path: parsedUrl.pathname + parsedUrl.search,
-          headers: {
-            'Range': `bytes=${startPosition}-`,
-            'User-Agent': 'Mozilla/5.0 Electron Downloader'
-          },
-          timeout: 30000 // 30초 타임아웃
-        }
-
-        const protocol = parsedUrl.protocol === 'https:' ? https : http
-        const request = protocol.request(options, (response) => {
-          downloadState.response = response
-
-          // 리다이렉션 확인 (300번대 응답)
-          if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400) {
-            const location = response.headers.location
-
-            if (!location) {
-              return reject(new Error(`리다이렉션 응답(${response.statusCode})에 Location 헤더가 없습니다 (주소: ${url})`))
-            }
-
-            // 리다이렉션 URL이 상대 경로인 경우 절대 경로로 변환
-            const redirectUrl = /^https?:\/\//i.test(location)
-              ? location
-              : new URL(location, parsedUrl.origin).href
-
-            console.log(`리다이렉션 발생: ${url} -> ${redirectUrl}`)
-
-            // 연결 정리
-            response.destroy()
-
-            // 새 URL로 재귀적으로 리다이렉션 처리
-            return followRedirects(redirectUrl, redirectCount + 1)
-          }
-
-          // 응답 코드 확인 (206 = Partial Content)
-          if (response.statusCode !== 206) {
-            downloadState.isInProgress = false
-            return reject(new Error(`이어받기 실패: 서버 응답 ${response.statusCode}\n주소: ${url}`))
-          }
-
-          // Content-Length 확인
-          const contentLength = response.headers['content-length']
-          const totalBytes = contentLength
-            ? parseInt(contentLength, 10) + startPosition
-            : 0
-
-          // 파일 스트림 설정 (이어쓰기 모드)
-          const writeStream = fs.createWriteStream(filePath, { flags: 'a' })
-          downloadState.writeStream = writeStream
-
-          // 스트림 오류 처리
-          writeStream.on('error', (error) => {
-            downloadState.isInProgress = false
-            reject(new Error(`파일 쓰기 오류: ${error.message}`))
-          })
-
-          // 데이터 처리
-          response.on('data', (chunk) => {
-            if (downloadState.isCancelled) {
-              response.destroy()
-              writeStream.close()
-              return resolve(false)
-            }
-
-            downloadState.downloadedChunks.push(chunk.length)
-            if (downloadState.downloadedChunks.length > 100) {
-              downloadState.downloadedChunks.shift()
-            }
-
-            // 진행 상황 업데이트 (1초에 한 번)
-            const now = Date.now()
-            const elapsedMs = now - downloadState.lastProgressUpdate
-
-            if (elapsedMs >= 1000) {
-              // 속도 계산
-              const lastChunks = downloadState.downloadedChunks.slice(-20)
-              const bytesInLastSecond = lastChunks.reduce((sum, size) => sum + size, 0)
-              const bytesPerSecond = elapsedMs > 0
-                ? (bytesInLastSecond * 1000) / Math.min(elapsedMs, 20000)
-                : 0
-
-              const transferredBytes = startPosition + writeStream.bytesWritten
-              const percent = totalBytes > 0 ? (transferredBytes / totalBytes) * 100 : 0
-
-              const remaining = bytesPerSecond > 0
-                ? Math.round((totalBytes - transferredBytes) / bytesPerSecond)
-                : 0
-
-              mainWindow.webContents.send('download-progress', {
-                percent,
-                transferredBytes,
-                totalBytes,
-                bytesPerSecond,
-                remaining,
-                isResumed: true
-              })
-
-              downloadState.lastProgressUpdate = now
-            }
-          })
-
-          // 오류 처리
-          response.on('error', (error) => {
-            writeStream.close()
-            downloadState.isInProgress = false
-            reject(new Error(`다운로드 중 오류 발생: ${error.message}`))
-          })
-
-          // 완료 처리
-          response.on('end', () => {
-            writeStream.end(() => {
-              if (!downloadState.isCancelled) {
-                downloadState.isInProgress = false
-                resolve(true)
-              } else {
-                resolve(false)
-              }
-            })
-          })
-
-          // 응답 파이프
-          response.pipe(writeStream)
-        })
-
-        // 요청 오류
-        request.on('error', (error) => {
-          downloadState.isInProgress = false
-          reject(new Error(`이어받기 요청 실패 (주소: ${url}): ${error.message}`))
-        })
-
-        // 요청 종료
-        request.end()
-      }
-
-      // 리다이렉션 처리 시작
-      followRedirects(fileUrl)
-    } catch (error) {
-      downloadState.isInProgress = false
-      reject(new Error(`이어받기 처리 오류 (주소: ${fileUrl}): ${error instanceof Error ? error.message : String(error)}`))
-    }
-  })
-}
-
-// 압축 해제 함수
-async function extractFile(
-  filePath: string,
-  targetFolder: string,
-  mainWindow: BrowserWindow
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      // 압축 해제 대상 폴더 생성
-      if (!fs.existsSync(targetFolder)) {
-        fs.mkdirSync(targetFolder, { recursive: true })
-      }
-
-      // 파일 확장자 확인
-      const fileExt = path.extname(filePath).toLowerCase();
-
-      // ZIP 파일이 아닌 경우 단순 복사
-      if (fileExt !== '.zip') {
-        try {
-          const fileName = path.basename(filePath);
-          const targetPath = path.join(targetFolder, fileName);
-          fs.copyFileSync(filePath, targetPath);
-          console.log(`압축 파일이 아님: ${filePath}를 ${targetPath}로 복사했습니다.`);
-          resolve(targetFolder);
-          return;
-        } catch (error) {
-          console.error('파일 복사 오류:', error);
-          reject(new Error(`파일 복사 실패: ${error instanceof Error ? error.message : String(error)}`));
-          return;
-        }
-      }
-
-      // 최상위 디렉토리만 만들고 하위 파일들을 일괄 복사하는 방식
-      const tempFolder = path.join(app.getPath('temp'), `extract-temp-${Date.now()}`);
-      if (!fs.existsSync(tempFolder)) {
-        fs.mkdirSync(tempFolder, { recursive: true });
-      }
-
-      try {
-        // 파일 스트림으로 읽어서 임시 zip 파일 생성
-        const tempZipPath = path.join(tempFolder, 'temp.zip');
-        fs.copyFileSync(filePath, tempZipPath);
-
-        // 임시 폴더에 zip 파일 내용을 먼저 추출
-        console.log(`안전 모드로 압축 해제 시작: ${tempZipPath}`);
-
-        let zip;
-        try {
-          zip = new admZip(tempZipPath);
-        } catch (error) {
-          console.error('ZIP 파일 열기 오류:', error);
-          const fileName = path.basename(filePath);
-          const targetPath = path.join(targetFolder, fileName);
-          fs.copyFileSync(filePath, targetPath);
-          console.log(`ZIP으로 열 수 없음: ${filePath}를 ${targetPath}로 복사했습니다.`);
-
-          // 임시 폴더 정리
-          cleanupTempFolder(tempFolder);
-
-          resolve(targetFolder);
-          return;
-        }
-
-        // 특수 파일 경로를 포함하지 않는 안전한 파일만 필터링
-        const safeEntries = zip.getEntries().filter(entry => {
-
-          // 위험한 경로 스킵
-          if (entry.entryName.includes('..') ||
-              entry.entryName.startsWith('/') ||
-              entry.entryName.includes(':')) {
-            console.log(`위험한 경로 건너뜀: ${entry.entryName}`);
-            return false;
-          }
-
-          return true;
-        });
-
-        // 진행 상황 전송 함수
-        const updateProgress = (current: number, total: number) => {
-          const percent = Math.round((current / total) * 100);
-          mainWindow.webContents.send('extract-progress', {
-            percent,
-            extracted: current,
-            total
-          });
-        };
-
-        // 안전한 파일만 하나씩 추출
-        const totalFiles = safeEntries.length;
-        let extractedFiles = 0;
-
-        // 파일 수가 적으면 모든 작업을 한 번에 수행
-        if (totalFiles < 5) {
-          for (const entry of safeEntries) {
-            if (!entry.isDirectory) {
-              try {
-                const entryPath = path.join(targetFolder, entry.entryName);
-                const dirPath = path.dirname(entryPath);
-
-                if (!fs.existsSync(dirPath)) {
-                  fs.mkdirSync(dirPath, { recursive: true });
-                }
-
-                fs.writeFileSync(entryPath, entry.getData());
-                extractedFiles++;
-                updateProgress(extractedFiles, totalFiles);
-              } catch (entryError) {
-                console.warn(`항목 처리 건너뜀: ${entry.entryName}`, entryError);
-              }
-            }
-          }
-        } else {
-          // 많은 파일은 배치로 처리
-          const batchSize = 10;
-          for (let i = 0; i < totalFiles; i += batchSize) {
-            const batch = safeEntries.slice(i, i + batchSize);
-
-            for (const entry of batch) {
-              if (!entry.isDirectory && !downloadState.isCancelled) {
-                try {
-                  const entryPath = path.join(targetFolder, entry.entryName);
-                  const dirPath = path.dirname(entryPath);
-
-                  if (!fs.existsSync(dirPath)) {
-                    fs.mkdirSync(dirPath, { recursive: true });
-                  }
-
-                  fs.writeFileSync(entryPath, entry.getData());
-                  extractedFiles++;
-                } catch (entryError) {
-                  console.warn(`항목 처리 건너뜀: ${entry.entryName}`, entryError);
-                }
-              }
-            }
-
-            // 배치마다 진행 상황 업데이트
-            updateProgress(extractedFiles, totalFiles);
-
-            // 취소 확인
-            if (downloadState.isCancelled) {
-              console.log('압축 해제 취소됨');
-              break;
-            }
-          }
-        }
-
-        console.log(`압축 해제 완료: ${extractedFiles}/${totalFiles} 파일`);
-
-        // 임시 폴더 정리
-        cleanupTempFolder(tempFolder);
-
-        resolve(targetFolder);
-      } catch (error) {
-        console.error('압축 해제 중 오류 발생:', error);
-
-        // 임시 폴더 정리
-        cleanupTempFolder(tempFolder);
-
-        reject(new Error(`압축 해제 실패: ${error instanceof Error ? error.message : String(error)}`));
-      }
-    } catch (error) {
-      console.error('압축 해제 처리 중 예상치 못한 오류:', error);
-      reject(new Error(`압축 해제 실패: ${error instanceof Error ? error.message : String(error)}`));
-    }
-  });
-}
-
-// 임시 폴더 정리 함수
-function cleanupTempFolder(folderPath: string): void {
-  if (fs.existsSync(folderPath)) {
-    try {
-      fs.rmSync(folderPath, { recursive: true, force: true });
-    } catch (error) {
-      console.error('임시 폴더 정리 실패:', error);
-    }
-  }
-}
-
-// 다운로드 이벤트 타입 정의
-interface DownloadEvent {
-  eventType: 'start' | 'progress' | 'complete' | 'cancel' | 'error'
-  timestamp: number
-  fileUrl?: string
-  fileSize?: number
-  progress?: number
-  bytesPerSecond?: number
-  averageSpeed?: number
-  elapsedTime?: number
-  targetFolder?: string
-  error?: string
 }
 
 // 다운로드 관련 IPC 핸들러 추가
@@ -813,7 +172,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
   });
 
   // 다운로드 및 압축 해제
-  ipcMain.handle('download-and-extract', async (event, fileUrl: string, targetFolder: string, shouldResume = false) => {
+  ipcMain.handle('download-and-extract', async (event, fileUrl: string, targetFolder: string) => {
     // 이미 다운로드 중인지 확인
     if (activeDownload) {
       throw new Error('Download is already in progress');
@@ -834,18 +193,24 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
         fs.mkdirSync(targetFolder, { recursive: true });
       }
 
-      // 이어받기 시작 위치
+      // 이전 다운로드 파일 정리 (항상 새로 다운로드하도록)
+      console.log(`다운로드 시작 전 이전 임시 파일 확인: ${filePath}`);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          console.log(`이전 다운로드 파일 삭제됨: ${filePath}`);
+        } catch (error) {
+          console.error(`이전 다운로드 파일 삭제 실패: ${filePath}`, error);
+          throw new Error(`이전 다운로드 파일을 삭제할 수 없습니다: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      // 항상 처음부터 다운로드 (이어받기 제거)
       let startBytes = 0;
       let totalBytes = 0;
 
-      // 기존 파일이 있고 이어받기 옵션이 활성화된 경우
-      if (shouldResume && fs.existsSync(filePath)) {
-        const stats = fs.statSync(filePath);
-        if (stats.size > 0) {
-          startBytes = stats.size;
-        }
-      } else if (fs.existsSync(filePath)) {
-        // 이어받기가 아니면 기존 파일 삭제
+      // 기존 파일이 있으면 삭제
+      if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
 
@@ -853,59 +218,36 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
       const controller = new AbortController();
       const signal = controller.signal;
 
-      let headers: HeadersInit = {};
-      if (startBytes > 0) {
-        headers['Range'] = `bytes=${startBytes}-`;
-      }
-
-      // 다운로드 요청 함수 - 범위 요청 실패 시 재시도 로직 포함
-      const startDownload = async (fromStart = false): Promise<Response> => {
-        // 처음부터 다시 시작해야 하는 경우
-        if (fromStart && startBytes > 0) {
-          console.log(`범위 요청 실패, 처음부터 다시 다운로드합니다: ${fileUrl}`);
-          startBytes = 0;
-
-          // 기존 파일이 있으면 삭제
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-
-          // Range 헤더 제거
-          headers = {};
-        }
+      // 다운로드 요청 함수
+      const startDownload = async (): Promise<Response> => {
+        // 다운로드 시작시 진행률 0% 표시
+        mainWindow.webContents.send('download-progress', {
+          percent: 0,
+          transferredBytes: 0,
+          totalBytes: 0,
+          bytesPerSecond: 0,
+          remaining: 0
+        });
 
         return fetch(fileUrl, {
           method: 'GET',
-          headers,
           signal
         });
       };
 
-      // 다운로드 시작 (처음부터 시작 = false)
-      let response = await startDownload(false);
-
-      // 416 오류(Range Not Satisfiable) 발생 시 처음부터 다시 시도
-      if (response.status === 416) {
-        console.log(`416 오류 발생: 서버가 요청한 범위를 처리할 수 없습니다. 처음부터 다시 시도합니다.`);
-        response = await startDownload(true);
-      }
+      // 다운로드 시작
+      let response = await startDownload();
 
       if (!response.ok) {
+        // 오류 발생 시 다운로드 상태 초기화
+        activeDownload = null;
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       // 총 크기 확인
       if (response.headers.has('content-length')) {
         const contentLength = parseInt(response.headers.get('content-length')!, 10);
-        totalBytes = startBytes + contentLength;
-      } else if (response.headers.has('content-range')) {
-        const range = response.headers.get('content-range');
-        if (range) {
-          const match = range.match(/bytes \d+-\d+\/(\d+)/);
-          if (match && match[1]) {
-            totalBytes = parseInt(match[1], 10);
-          }
-        }
+        totalBytes = contentLength;
       }
 
       // 다운로드 상태 저장
@@ -914,21 +256,21 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
         url: fileUrl,
         targetPath: targetFolder,
         startTime,
-        resumeStartBytes: startBytes,
+        resumeStartBytes: 0,
         cancel: () => controller.abort()
       };
 
       // 스트림 생성
-      const fileStream = fs.createWriteStream(filePath, { flags: startBytes > 0 ? 'a' : 'w' });
+      const fileStream = fs.createWriteStream(filePath);
       const reader = response.body!.getReader();
 
-      // 총 다운로드 완료 바이트 수
-      let receivedBytes = startBytes;
+      // 다운로드된 바이트 수
+      let receivedBytes = 0;
       let lastProgressTime = Date.now();
-      let lastProgressBytes = receivedBytes;
+      let lastProgressBytes = 0;
 
       // 다운로드 진행 상황 처리
-      const processDownload = async (): Promise<void> => {
+      const processDownload = async (): Promise<string> => {
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -938,7 +280,13 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             }
 
             // 파일에 데이터 쓰기
-            fileStream.write(Buffer.from(value));
+            try {
+              fileStream.write(Buffer.from(value));
+            } catch (writeError) {
+              // 파일 쓰기 오류 발생 시 다운로드 상태 초기화
+              activeDownload = null;
+              throw writeError;
+            }
             receivedBytes += value.length;
 
             // 다운로드 속도 계산
@@ -948,7 +296,14 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             if (elapsedSinceLastProgress >= 0.5) { // 최소 0.5초 간격으로 업데이트
               const bytesPerSecond = (receivedBytes - lastProgressBytes) / elapsedSinceLastProgress;
               const remaining = bytesPerSecond > 0 ? (totalBytes - receivedBytes) / bytesPerSecond : 0;
-              const percent = Math.floor((receivedBytes / totalBytes) * 100);
+
+              // 진행률 계산 - 총 크기가 0이면 0%로 표시
+              let percent = 0;
+              if (totalBytes > 0) {
+                percent = Math.floor((receivedBytes / totalBytes) * 100);
+                // 진행률이 100을 넘지 않도록 제한
+                percent = Math.min(percent, 99);
+              }
 
               // 진행 상황 전송
               mainWindow.webContents.send('download-progress', {
@@ -956,8 +311,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
                 transferredBytes: receivedBytes,
                 totalBytes,
                 bytesPerSecond,
-                remaining,
-                isResumed: startBytes > 0
+                remaining
               });
 
               // 마지막 진행 상태 업데이트
@@ -975,13 +329,47 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             transferredBytes: totalBytes,
             totalBytes,
             bytesPerSecond: 0,
-            remaining: 0,
-            isResumed: startBytes > 0
+            remaining: 0
           });
 
-          // 압축 파일 확인
+          // 다운로드 파일 확인 - 실패 시 오류 발생
           if (!fs.existsSync(filePath)) {
-            throw new Error('Download failed: File not found');
+            // 다운로드 상태 초기화
+            resetDownloadState();
+            activeDownload = null;
+            throw new Error('다운로드 실패: 파일을 찾을 수 없습니다');
+          }
+
+          // 파일 크기 확인 - 0바이트 파일은 실패로 처리
+          const fileStats = fs.statSync(filePath);
+          if (fileStats.size === 0) {
+            // 다운로드 상태 초기화
+            resetDownloadState();
+            activeDownload = null;
+            throw new Error('다운로드 실패: 파일 크기가 0입니다');
+          }
+
+          // 다운로드 성공, 압축 해제 시작
+          console.log(`다운로드 성공: ${filePath} (${fileStats.size} 바이트), 압축 해제 시작`);
+
+          // 압축 파일 유효성 검사
+          try {
+            // ZIP 파일 헤더 확인 (ZIP 파일은 'PK'로 시작)
+            const buffer = Buffer.alloc(4);
+            const fd = fs.openSync(filePath, 'r');
+            fs.readSync(fd, buffer, 0, 4, 0);
+            fs.closeSync(fd);
+
+            const isPKZip = buffer[0] === 0x50 && buffer[1] === 0x4B;
+            if (!isPKZip) {
+              resetDownloadState();
+              activeDownload = null;
+              throw new Error('다운로드한 파일이 유효한 ZIP 파일이 아닙니다');
+            }
+          } catch (error) {
+            resetDownloadState();
+            activeDownload = null;
+            throw new Error(`압축 파일 검증 실패: ${error instanceof Error ? error.message : String(error)}`);
           }
 
           // 압축 해제 시작
@@ -992,71 +380,110 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
           });
 
           // 압축 해제 (실제 압축 해제 내용에 맞게 수정 필요)
-          // 예시: zip 파일 압축 해제
-          const extract = util.promisify(require('extract-zip'));
-          await extract(filePath, {
-            dir: targetFolder,
-            // 심링크 처리 중 오류 발생 시 무시하는 옵션 추가
-            onEntry: (entry: any, zipFile: any) => {
-              const entriesTotal = zipFile.entriesCount;
-              const entriesExtracted = Math.floor((zipFile.entriesRead / entriesTotal) * 100);
+          // admZip 라이브러리로 압축 해제 방식 변경
+          try {
+            const zip = new admZip(filePath);
+            const zipEntries = zip.getEntries();
+            const totalEntries = zipEntries.length;
 
-              // 압축 해제 진행 상황 전송
-              mainWindow.webContents.send('extract-progress', {
-                percent: entriesExtracted,
-                extracted: zipFile.entriesRead,
-                total: entriesTotal
-              });
-            },
-            // 심링크 생성 중 오류를 무시하기 위한 핸들러 추가
-            async onBeforeExtract(entry) {
-              // 심링크 파일인 경우 대상 경로가 이미 존재하는지 확인
-              if (entry.type === 'SymbolicLink') {
-                try {
-                  // 대상 파일 경로
-                  const entryPath = path.join(targetFolder, entry.fileName);
+            // 진행 상황 업데이트를 위한 카운터
+            let extractedCount = 0;
 
-                  // 파일이 이미 존재하면 먼저 삭제
-                  if (fs.existsSync(entryPath)) {
-                    try {
-                      if (fs.lstatSync(entryPath).isDirectory()) {
-                        fs.rmdirSync(entryPath, { recursive: true });
-                      } else {
-                        fs.unlinkSync(entryPath);
-                      }
-                      console.log(`기존 심링크 파일 삭제됨: ${entryPath}`);
-                    } catch (removeError) {
-                      console.warn(`기존 파일 삭제 실패, 이 항목은 건너뜁니다: ${entryPath}`, removeError);
-                      // 오류가 발생해도 압축 해제 프로세스를 중단하지 않고 true를 반환하여 해당 항목을 건너뜁니다
-                      return true;
-                    }
-                  }
-                } catch (error) {
-                  console.warn(`심링크 확인 중 오류, 이 항목은 건너뜁니다: ${entry.fileName}`, error);
-                  return true; // 오류 발생 시 해당 항목 건너뛰기
+            // 각 항목 하나씩 처리
+            for (const entry of zipEntries) {
+              try {
+                // 디렉토리 항목은 건너뛰기
+                if (entry.isDirectory) {
+                  continue;
                 }
+
+                // 대상 파일 경로
+                const entryPath = path.join(targetFolder, entry.entryName);
+                const entryDir = path.dirname(entryPath);
+
+                // 대상 디렉토리 생성
+                if (!fs.existsSync(entryDir)) {
+                  fs.mkdirSync(entryDir, { recursive: true });
+                }
+
+                // 파일이 이미 존재하는 경우 먼저 삭제
+                if (fs.existsSync(entryPath)) {
+                  try {
+                    fs.unlinkSync(entryPath);
+                  } catch (error) {
+                    console.warn(`기존 파일 삭제 실패: ${entryPath}`, error);
+                  }
+                }
+
+                // 파일 추출
+                try {
+                  const entryData = entry.getData();
+                  fs.writeFileSync(entryPath, entryData, { flag: 'w' });
+                  console.log(`파일 추출됨: ${entryPath}`);
+                } catch (writeError) {
+                  console.error(`파일 쓰기 실패: ${entryPath}`, writeError);
+                  // 실패해도 계속 진행
+                }
+
+                // 카운터 증가 및 진행 상황 업데이트
+                extractedCount++;
+
+                // 20개 항목마다 또는 마지막 항목에서 진행 상황 보고
+                if (extractedCount % 20 === 0 || extractedCount === totalEntries) {
+                  const percent = Math.floor((extractedCount / totalEntries) * 100);
+                  mainWindow.webContents.send('extract-progress', {
+                    percent,
+                    extracted: extractedCount,
+                    total: totalEntries
+                  });
+                }
+              } catch (error) {
+                console.error(`항목 압축 해제 실패: ${entry.entryName}`, error);
               }
-              return false; // 정상적으로 처리할 수 있는 경우 false 반환
             }
-          });
 
-          // 압축 해제 완료 메시지
-          mainWindow.webContents.send('extract-progress', {
-            percent: 100,
-            extracted: 100,
-            total: 100
-          });
+            // 압축 해제 완료 메시지
+            mainWindow.webContents.send('extract-progress', {
+              percent: 100,
+              extracted: totalEntries,
+              total: totalEntries
+            });
 
-          // 다운로드 상태 초기화
-          activeDownload = null;
+            // 다운로드 상태 초기화
+            resetDownloadState();
 
-          return targetFolder;
+            // 압축 해제 완료 로그
+            console.log(`압축 해제 완료 - 총 ${extractedCount}/${totalEntries} 파일 처리됨`);
+
+            return targetFolder;
+          } catch (zipError) {
+            console.error('압축 파일 처리 중 심각한 오류:', zipError);
+
+            // 오류의 스택 트레이스도 함께 기록
+            if (zipError instanceof Error && zipError.stack) {
+              console.error('스택 트레이스:', zipError.stack);
+            }
+
+            // 파일 내용 확인 (첫 100바이트)
+            try {
+              const fileHeader = fs.readFileSync(filePath, { encoding: 'hex', flag: 'r' }).slice(0, 200);
+              console.error('파일 헤더 (HEX):', fileHeader);
+            } catch (readError) {
+              console.error('파일 헤더 읽기 실패:', readError);
+            }
+
+            // 오류 시 다운로드 상태 초기화
+            resetDownloadState();
+            activeDownload = null;
+
+            throw new Error(`압축 파일 처리 실패: ${zipError instanceof Error ? zipError.message : String(zipError)}`);
+          }
         } catch (error) {
           // 에러 발생 시 스트림 닫기
           fileStream.end();
 
           // 다운로드 상태 초기화
-          activeDownload = null;
+          resetDownloadState();
 
           throw error;
         }
@@ -1068,7 +495,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
 
     } catch (error) {
       // 다운로드 상태 초기화
-      activeDownload = null;
+      resetDownloadState();
       console.error('Download error:', error);
       throw error;
     }
@@ -1078,6 +505,21 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('cancel-download', async () => {
     if (activeDownload) {
       activeDownload.cancel();
+
+      // 취소된 다운로드의 임시 파일 삭제
+      try {
+        const tempDir = path.join(app.getPath('temp'), 'app-downloads');
+        const filename = path.basename(activeDownload.url);
+        const filePath = path.join(tempDir, filename);
+
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`취소된 다운로드 파일 삭제: ${filePath}`);
+        }
+      } catch (error) {
+        console.error('취소된 다운로드 파일 삭제 실패:', error);
+      }
+
       activeDownload = null;
       return true;
     }
@@ -1086,66 +528,11 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
 
   // 이어받기 가능 여부 확인
   ipcMain.handle('check-resume-available', async (event, fileUrl: string) => {
-    try {
-      const tempDir = path.join(app.getPath('temp'), 'app-downloads');
-      const filename = path.basename(fileUrl);
-      const filePath = path.join(tempDir, filename);
-
-      if (!fs.existsSync(filePath)) {
-        return {
-          canResume: false,
-          reason: 'File not found'
-        };
-      }
-
-      const stats = fs.statSync(filePath);
-      if (stats.size === 0) {
-        return {
-          canResume: false,
-          reason: 'Empty file'
-        };
-      }
-
-      try {
-        // HEAD 요청으로 총 크기 확인
-        const response = await fetch(fileUrl, { method: 'HEAD' });
-        if (response.ok && response.headers.has('content-length')) {
-          const totalBytes = parseInt(response.headers.get('content-length')!, 10);
-
-          // 이미 완료된 경우
-          if (stats.size >= totalBytes) {
-            return {
-              canResume: false,
-              reason: 'Already completed'
-            };
-          }
-
-          // 이어받기 가능
-          return {
-            canResume: true,
-            resumeInfo: {
-              fileUrl,
-              filePath,
-              downloadedBytes: stats.size,
-              totalBytes
-            }
-          };
-        }
-      } catch (error) {
-        console.error('Error checking file size:', error);
-      }
-
-      return {
-        canResume: false,
-        reason: 'Cannot determine file size'
-      };
-    } catch (error) {
-      console.error('Error checking resume:', error);
-      return {
-        canResume: false,
-        reason: String(error)
-      };
-    }
+    // 이어받기 기능 제거로 항상 false 반환
+    return {
+      canResume: false,
+      reason: 'Resume functionality is disabled'
+    };
   });
 
   // 다운로드 이벤트 전송
