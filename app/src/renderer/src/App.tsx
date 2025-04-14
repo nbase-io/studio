@@ -2,6 +2,15 @@ import { useState, useEffect } from 'react'
 import { GameLauncher } from '@/components/GameLauncher'
 import React from 'react'
 import { toast, Toaster } from 'react-hot-toast'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 
 // Types definition
 declare global {
@@ -121,6 +130,13 @@ function App(): JSX.Element {
   const isCancelling = downloadStatus === 'cancelling'
   const isCompleted = downloadStatus === 'completed'
   const isProcessing = isDownloading || isExtracting || isCancelling
+
+  // 팝업 관련 상태
+  const [showErrorDialog, setShowErrorDialog] = useState(false)
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false)
+  const [dialogMessage, setDialogMessage] = useState('')
+  const [dialogTitle, setDialogTitle] = useState('')
+  const [dialogDetails, setDialogDetails] = useState('')
 
   // Check if resume is available
   useEffect(() => {
@@ -552,6 +568,20 @@ function App(): JSX.Element {
           setDownloadSpeed('-');
           setRemainingTime('-');
         }
+
+        // 다운로드 완료 시
+        if (extractedFolder) {
+          setDownloadStatus('completed');
+          setDownloadSize('Download and extraction completed');
+          setDownloadSpeed('-');
+          setRemainingTime('-');
+
+          // 완료 팝업 표시
+          setDialogTitle('다운로드 완료');
+          setDialogMessage('파일 다운로드 및 압축 해제가 완료되었습니다.');
+          setDialogDetails(`대상 폴더: ${extractedFolder}`);
+          setShowSuccessDialog(true);
+        }
       } catch (error) {
         // Error occurred during download or extraction process
         console.error('Error during download or extraction:', error);
@@ -568,6 +598,12 @@ function App(): JSX.Element {
             // 기타 오류
             const errorMsg = error instanceof Error ? error.message : String(error);
             setDownloadSize(`Error during download: ${errorMsg}`);
+
+            // 오류 팝업 표시
+            setDialogTitle('다운로드 오류');
+            setDialogMessage(`다운로드 중 오류가 발생했습니다: ${errorMsg}`);
+            setDialogDetails(error instanceof Error && error.stack ? error.stack : '상세 정보 없음');
+            setShowErrorDialog(true);
 
             // Send error event
             if (downloadStats) {
@@ -731,6 +767,42 @@ function App(): JSX.Element {
     <div className="h-screen w-full flex items-center justify-center overflow-hidden">
       {/* Notification component */}
       <Toaster position="top-center" />
+
+      {/* 오류 팝업 */}
+      <AlertDialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-500">{dialogTitle}</AlertDialogTitle>
+            <AlertDialogDescription>
+              <div className="mb-4">{dialogMessage}</div>
+              <div className="bg-gray-100 p-4 rounded-md overflow-auto max-h-60 text-xs font-mono whitespace-pre-wrap">
+                {dialogDetails}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowErrorDialog(false)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 성공 팝업 */}
+      <AlertDialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-green-500">{dialogTitle}</AlertDialogTitle>
+            <AlertDialogDescription>
+              <div className="mb-4">{dialogMessage}</div>
+              <div className="bg-gray-50 p-4 rounded-md text-sm">
+                {dialogDetails}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowSuccessDialog(false)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <GameLauncher
         image={currentImage}

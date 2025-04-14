@@ -5,99 +5,64 @@ import icon from '../../resources/icon.png?asset'
 import { setupUpdaterHandlers } from './updaterHandler'
 import fs from 'fs'
 import path from 'path'
-import http from 'http'
-import https from 'https'
-import { URL } from 'url'
 import admZip from 'adm-zip'
+import { Logger, LogLevel } from './utils/logger'
 
 // ===========================================
 // 전역 상태 관리
 // ===========================================
 
+// 로그 인스턴스 초기화
+const logger = Logger.getInstance({
+  enableRemote: false, // 서버로 로그 전송 비활성화 (필요시 활성화)
+  minLevel: is.dev ? LogLevel.DEBUG : LogLevel.INFO // 개발 모드에서는 DEBUG 레벨부터, 프로덕션에서는 INFO 레벨부터 기록
+})
+
 // 다운로드 관련 전역 상태 관리
 interface DownloadState {
-  isInProgress: boolean
-  isCancelled: boolean
-  response: http.IncomingMessage | null
-  writeStream: fs.WriteStream | null
-  lastProgressUpdate: number
-  downloadedChunks: number[]
-  tempDir: string | null
-  headers: http.OutgoingHttpHeaders
-  abortController: AbortController | null
-  startTime: number
-  resumePosition: number
-}
-
-let downloadState: DownloadState = {
-  isInProgress: false,
-  isCancelled: false,
-  response: null,
-  writeStream: null,
-  lastProgressUpdate: 0,
-  downloadedChunks: [],
-  tempDir: null,
-  headers: {},
-  abortController: null,
-  startTime: 0,
-  resumePosition: 0
-}
-
-// 이어받기 확인 결과 인터페이스
-interface ResumeCheckResult {
-  canResume: boolean
+  status: string
+  progress: number
+  error: string | null
   filePath: string
-  downloadedBytes: number
-  totalBytes: number
-  reason: string
+  isCompleted: boolean
+  startTime: number | null
+  endTime: number | null
+  downloadSpeed: number
+  size: {
+    total: number
+    transferred: number
+  }
+}
+
+// 다운로드 상태 저장 변수
+const downloadState: DownloadState = {
+  status: 'idle',
+  progress: 0,
+  error: null,
+  filePath: '',
+  isCompleted: false,
+  startTime: null,
+  endTime: null,
+  downloadSpeed: 0,
+  size: {
+    total: 0,
+    transferred: 0
+  }
 }
 
 // 다운로드 상태 초기화 함수
 function resetDownloadState(): void {
-  downloadState = {
-    isInProgress: false,
-    isCancelled: false,
-    response: null,
-    writeStream: null,
-    lastProgressUpdate: 0,
-    downloadedChunks: [],
-    tempDir: null,
-    headers: {},
-    abortController: null,
-    startTime: 0,
-    resumePosition: 0
-  }
-}
-
-// 다운로드 파일 경로 생성
-function getDownloadFilePath(fileUrl: string): string {
-  const fileName = new URL(fileUrl).pathname.split('/').pop() || 'download'
-  return path.join(app.getPath('downloads'), fileName)
-}
-
-// URL 범위 지원 여부 확인
-async function checkRangeSupport(url: string): Promise<boolean> {
-  try {
-    const controller = new AbortController()
-    const signal = controller.signal
-
-    const response = await fetch(url, {
-      method: 'HEAD',
-      headers: {
-        'Range': 'bytes=0-0'
-      },
-      signal
-    })
-
-    setTimeout(() => controller.abort(), 5000) // 5초 타임아웃
-
-    return response.status === 206 ||
-           response.headers.has('Accept-Ranges') &&
-           response.headers.get('Accept-Ranges') !== 'none'
-  } catch (error) {
-    console.error('범위 지원 확인 오류:', error)
-    return false
-  }
+  // 기존 downloadState 객체의 프로퍼티 변경
+  downloadState.status = 'idle';
+  downloadState.progress = 0;
+  downloadState.error = null;
+  downloadState.filePath = '';
+  downloadState.isCompleted = false;
+  downloadState.startTime = null;
+  downloadState.endTime = null;
+  downloadState.downloadSpeed = 0;
+  downloadState.size.total = 0;
+  downloadState.size.transferred = 0;
 }
 
 // 다운로드 관련 IPC 핸들러 추가
@@ -111,7 +76,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
   } | null = null;
 
   // 다운로드 초기화 및 진행 상태 확인
-  ipcMain.handle('initialize-download', async (event, fileUrl: string, shouldCleanup: boolean) => {
+  ipcMain.handle('initialize-download', async () => {
     // 이미 다운로드 중인지 확인
     if (activeDownload) {
       return {
@@ -127,43 +92,12 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      const filename = path.basename(fileUrl);
-      const filePath = path.join(tempDir, filename);
-
-      // 이어받기 확인
-      let canResume = false;
-      let resumeInfo = null;
-
-      if (fs.existsSync(filePath)) {
-        const stats = fs.statSync(filePath);
-        if (stats.size > 0) {
-          try {
-            // HEAD 요청으로 총 크기 확인
-            const response = await fetch(fileUrl, { method: 'HEAD' });
-            if (response.ok && response.headers.has('content-length')) {
-              const totalBytes = parseInt(response.headers.get('content-length')!, 10);
-
-              // 이어받기 정보 설정
-              canResume = true;
-              resumeInfo = {
-                filePath,
-                downloadedBytes: stats.size,
-                totalBytes
-              };
-            }
-          } catch (error) {
-            console.error('Error checking file size:', error);
-          }
-        }
-      }
-
       return {
         success: true,
-        canResume,
-        resumeInfo
+        canResume: false
       };
     } catch (error) {
-      console.error('Error initializing download:', error);
+      logger.error('Download', '다운로드 초기화 실패', error);
       return {
         success: false,
         error: String(error)
@@ -172,7 +106,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
   });
 
   // 다운로드 및 압축 해제
-  ipcMain.handle('download-and-extract', async (event, fileUrl: string, targetFolder: string) => {
+  ipcMain.handle('download-and-extract', async (_event, fileUrl: string, targetFolder: string): Promise<string> => {
     // 이미 다운로드 중인지 확인
     if (activeDownload) {
       throw new Error('Download is already in progress');
@@ -186,7 +120,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
       }
 
       const filename = path.basename(fileUrl);
-      const filePath = path.join(tempDir, filename);
+      let filePath = path.join(tempDir, filename);
 
       // 타겟 폴더 확인
       if (!fs.existsSync(targetFolder)) {
@@ -194,24 +128,35 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
       }
 
       // 이전 다운로드 파일 정리 (항상 새로 다운로드하도록)
-      console.log(`다운로드 시작 전 이전 임시 파일 확인: ${filePath}`);
+      logger.info('Download', `다운로드 시작 전 이전 임시 파일 확인`, { path: filePath });
       if (fs.existsSync(filePath)) {
         try {
-          fs.unlinkSync(filePath);
-          console.log(`이전 다운로드 파일 삭제됨: ${filePath}`);
+          // 파일이 다른 프로세스에 의해 잠겨있지 않은지 확인
+          try {
+            const fileHandle = fs.openSync(filePath, 'r');
+            fs.closeSync(fileHandle);
+
+            // 파일 삭제
+            fs.unlinkSync(filePath);
+            logger.info('File', `이전 다운로드 파일 삭제됨`, { path: filePath });
+          } catch (fileError) {
+            logger.warn('File', `파일 접근 오류, 강제 삭제 시도`, { path: filePath, error: fileError });
+            // 강제 삭제 시도
+            try {
+              fs.rmSync(filePath, { force: true });
+              logger.info('File', `이전 다운로드 파일 강제 삭제됨`, { path: filePath });
+            } catch (removeError) {
+              logger.error('File', `파일 강제 삭제 실패`, { path: filePath, error: removeError });
+              // 최후의 수단: 임시 파일 경로 변경
+              const newFilePath = `${filePath}.${Date.now()}.new`;
+              logger.info('File', `새 다운로드 경로 생성`, { oldPath: filePath, newPath: newFilePath });
+              filePath = newFilePath;
+            }
+          }
         } catch (error) {
-          console.error(`이전 다운로드 파일 삭제 실패: ${filePath}`, error);
+          logger.error('File', `이전 다운로드 파일 삭제 실패`, { path: filePath, error });
           throw new Error(`이전 다운로드 파일을 삭제할 수 없습니다: ${error instanceof Error ? error.message : String(error)}`);
         }
-      }
-
-      // 항상 처음부터 다운로드 (이어받기 제거)
-      let startBytes = 0;
-      let totalBytes = 0;
-
-      // 기존 파일이 있으면 삭제
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
       }
 
       // 다운로드 시작
@@ -229,6 +174,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
           remaining: 0
         });
 
+        logger.logDownload('시작', fileUrl, { targetPath: filePath });
         return fetch(fileUrl, {
           method: 'GET',
           signal
@@ -236,18 +182,21 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
       };
 
       // 다운로드 시작
-      let response = await startDownload();
+      const response = await startDownload();
 
       if (!response.ok) {
         // 오류 발생 시 다운로드 상태 초기화
         activeDownload = null;
+        logger.error('Network', `HTTP 오류 발생`, { status: response.status, url: fileUrl });
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       // 총 크기 확인
+      let totalBytes = 0;
       if (response.headers.has('content-length')) {
         const contentLength = parseInt(response.headers.get('content-length')!, 10);
         totalBytes = contentLength;
+        logger.debug('Download', `다운로드 크기 정보`, { totalBytes, url: fileUrl });
       }
 
       // 다운로드 상태 저장
@@ -257,7 +206,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
         targetPath: targetFolder,
         startTime,
         resumeStartBytes: 0,
-        cancel: () => controller.abort()
+        cancel: (): void => controller.abort()
       };
 
       // 스트림 생성
@@ -272,6 +221,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
       // 다운로드 진행 상황 처리
       const processDownload = async (): Promise<string> => {
         try {
+          // eslint-disable-next-line no-constant-condition
           while (true) {
             const { done, value } = await reader.read();
 
@@ -285,6 +235,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             } catch (writeError) {
               // 파일 쓰기 오류 발생 시 다운로드 상태 초기화
               activeDownload = null;
+              logger.error('File', `파일 쓰기 오류`, { path: filePath, error: writeError });
               throw writeError;
             }
             receivedBytes += value.length;
@@ -314,14 +265,34 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
                 remaining
               });
 
+              // 로그에 현재 다운로드 상태 기록 (1% 마다)
+              if (percent % 10 === 0) {
+                logger.debug('Download', `다운로드 진행 상황`, {
+                  percent,
+                  receivedBytes,
+                  totalBytes,
+                  bytesPerSecond: Math.round(bytesPerSecond)
+                });
+              }
+
               // 마지막 진행 상태 업데이트
               lastProgressTime = now;
               lastProgressBytes = receivedBytes;
             }
           }
 
-          // 파일 닫기
-          fileStream.end();
+          // 파일 닫기 - Promise로 감싸서 완전히 닫힐 때까지 기다림
+          await new Promise<void>((resolve, reject) => {
+            fileStream.end(err => {
+              if (err) {
+                logger.error('File', `파일 스트림 닫기 실패`, { path: filePath, error: err });
+                reject(err);
+              } else {
+                logger.debug('File', '파일 스트림이 성공적으로 닫혔습니다', { path: filePath });
+                resolve();
+              }
+            });
+          });
 
           // 다운로드 완료 시 마지막 진행 상황 전송
           mainWindow.webContents.send('download-progress', {
@@ -332,11 +303,18 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             remaining: 0
           });
 
+          logger.logDownload('완료', fileUrl, {
+            filePath,
+            fileSize: totalBytes,
+            downloadTime: (Date.now() - startTime) / 1000
+          });
+
           // 다운로드 파일 확인 - 실패 시 오류 발생
           if (!fs.existsSync(filePath)) {
             // 다운로드 상태 초기화
             resetDownloadState();
             activeDownload = null;
+            logger.error('Download', '다운로드 실패: 파일을 찾을 수 없음', { filePath });
             throw new Error('다운로드 실패: 파일을 찾을 수 없습니다');
           }
 
@@ -346,11 +324,48 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             // 다운로드 상태 초기화
             resetDownloadState();
             activeDownload = null;
+            logger.error('Download', '다운로드 실패: 파일 크기가 0', { filePath });
             throw new Error('다운로드 실패: 파일 크기가 0입니다');
           }
 
+          // 파일 크기 검증 - 예상 크기와 실제 크기 비교
+          if (totalBytes > 0 && fileStats.size !== totalBytes) {
+            logger.warn('Download', `파일 크기 불일치`, {
+              expected: totalBytes,
+              actual: fileStats.size,
+              difference: fileStats.size - totalBytes,
+              filePath
+            });
+
+            // 일정 오차 범위 내에서는 허용 (1% 미만 차이)
+            const sizeDifference = Math.abs(fileStats.size - totalBytes);
+            const percentDifference = (sizeDifference / totalBytes) * 100;
+
+            if (percentDifference >= 1) {
+              // 다운로드 상태 초기화
+              resetDownloadState();
+              activeDownload = null;
+              logger.error('Download', `다운로드 파일 크기 불일치 (허용 범위 초과)`, {
+                expected: totalBytes,
+                actual: fileStats.size,
+                percentDifference
+              });
+              throw new Error(`다운로드한 파일 크기가 예상과 다릅니다: 예상=${totalBytes} 바이트, 실제=${fileStats.size} 바이트 (${percentDifference.toFixed(2)}% 차이)`);
+            } else {
+              // 오차가 적으면 경고만 표시하고 계속 진행
+              logger.warn('Download', `파일 크기 불일치가 허용 오차 범위 내에 있습니다`, {
+                expected: totalBytes,
+                actual: fileStats.size,
+                percentDifference
+              });
+            }
+          }
+
           // 다운로드 성공, 압축 해제 시작
-          console.log(`다운로드 성공: ${filePath} (${fileStats.size} 바이트), 압축 해제 시작`);
+          logger.logExtract('시작', filePath, {
+            fileSize: fileStats.size,
+            targetFolder: targetFolder
+          });
 
           // 압축 파일 유효성 검사
           try {
@@ -364,11 +379,21 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             if (!isPKZip) {
               resetDownloadState();
               activeDownload = null;
+              logger.error('Extract', '유효하지 않은 ZIP 파일', {
+                filePath,
+                header: buffer.toString('hex')
+              });
               throw new Error('다운로드한 파일이 유효한 ZIP 파일이 아닙니다');
             }
+
+            logger.debug('Extract', 'ZIP 파일 헤더 검증 성공', {
+              filePath,
+              header: buffer.toString('hex').substring(0, 8)
+            });
           } catch (error) {
             resetDownloadState();
             activeDownload = null;
+            logger.error('Extract', '압축 파일 검증 실패', { filePath, error });
             throw new Error(`압축 파일 검증 실패: ${error instanceof Error ? error.message : String(error)}`);
           }
 
@@ -385,6 +410,8 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             const zip = new admZip(filePath);
             const zipEntries = zip.getEntries();
             const totalEntries = zipEntries.length;
+
+            logger.debug('Extract', `ZIP 파일 분석 완료`, { totalEntries, filePath });
 
             // 진행 상황 업데이트를 위한 카운터
             let extractedCount = 0;
@@ -411,7 +438,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
                   try {
                     fs.unlinkSync(entryPath);
                   } catch (error) {
-                    console.warn(`기존 파일 삭제 실패: ${entryPath}`, error);
+                    logger.warn('Extract', `기존 파일 삭제 실패`, { path: entryPath, error });
                   }
                 }
 
@@ -419,9 +446,8 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
                 try {
                   const entryData = entry.getData();
                   fs.writeFileSync(entryPath, entryData, { flag: 'w' });
-                  console.log(`파일 추출됨: ${entryPath}`);
                 } catch (writeError) {
-                  console.error(`파일 쓰기 실패: ${entryPath}`, writeError);
+                  logger.error('Extract', `파일 쓰기 실패`, { path: entryPath, error: writeError });
                   // 실패해도 계속 진행
                 }
 
@@ -436,9 +462,17 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
                     extracted: extractedCount,
                     total: totalEntries
                   });
+
+                  if (extractedCount % 100 === 0) {
+                    logger.debug('Extract', `압축 해제 진행 상황`, {
+                      percent,
+                      extractedCount,
+                      totalEntries
+                    });
+                  }
                 }
               } catch (error) {
-                console.error(`항목 압축 해제 실패: ${entry.entryName}`, error);
+                logger.error('Extract', `항목 압축 해제 실패`, { entryName: entry.entryName, error });
               }
             }
 
@@ -453,23 +487,27 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
             resetDownloadState();
 
             // 압축 해제 완료 로그
-            console.log(`압축 해제 완료 - 총 ${extractedCount}/${totalEntries} 파일 처리됨`);
+            logger.logExtract('완료', targetFolder, {
+              extractedFiles: extractedCount,
+              totalEntries,
+              sourceZip: filePath
+            });
 
             return targetFolder;
           } catch (zipError) {
-            console.error('압축 파일 처리 중 심각한 오류:', zipError);
+            logger.error('Extract', '압축 파일 처리 중 심각한 오류', { filePath, error: zipError });
 
             // 오류의 스택 트레이스도 함께 기록
             if (zipError instanceof Error && zipError.stack) {
-              console.error('스택 트레이스:', zipError.stack);
+              logger.debug('Extract', '스택 트레이스', { stack: zipError.stack });
             }
 
             // 파일 내용 확인 (첫 100바이트)
             try {
               const fileHeader = fs.readFileSync(filePath, { encoding: 'hex', flag: 'r' }).slice(0, 200);
-              console.error('파일 헤더 (HEX):', fileHeader);
+              logger.debug('Extract', '파일 헤더 (HEX)', { header: fileHeader });
             } catch (readError) {
-              console.error('파일 헤더 읽기 실패:', readError);
+              logger.error('Extract', '파일 헤더 읽기 실패', { error: readError });
             }
 
             // 오류 시 다운로드 상태 초기화
@@ -485,6 +523,7 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
           // 다운로드 상태 초기화
           resetDownloadState();
 
+          logger.error('Download', '다운로드 프로세스 중 오류 발생', { error });
           throw error;
         }
       };
@@ -496,38 +535,64 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
     } catch (error) {
       // 다운로드 상태 초기화
       resetDownloadState();
-      console.error('Download error:', error);
+      logger.error('Download', '다운로드 오류', { error });
       throw error;
     }
   });
 
   // 다운로드 취소
-  ipcMain.handle('cancel-download', async () => {
-    if (activeDownload) {
-      activeDownload.cancel();
+  ipcMain.handle('cancel-download', async (): Promise<boolean> => {
+    // 현재 다운로드가 없으면 무시
+    if (!activeDownload) {
+      return false;
+    }
 
-      // 취소된 다운로드의 임시 파일 삭제
-      try {
-        const tempDir = path.join(app.getPath('temp'), 'app-downloads');
-        const filename = path.basename(activeDownload.url);
-        const filePath = path.join(tempDir, filename);
+    logger.logDownload('취소', activeDownload.url);
 
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log(`취소된 다운로드 파일 삭제: ${filePath}`);
-        }
-      } catch (error) {
-        console.error('취소된 다운로드 파일 삭제 실패:', error);
+    try {
+      // 다운로드 취소 설정
+      if (activeDownload.cancel) {
+        activeDownload.cancel();
       }
 
-      activeDownload = null;
-      return true;
+      // 취소된 다운로드의 임시 파일 삭제
+      // 파일 스트림이 아직 열려있다면 안전하게 종료하기 위해 약간 지연
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const tempDir = path.join(app.getPath('temp'), 'app-downloads');
+      const filename = path.basename(activeDownload.url);
+      const filePath = path.join(tempDir, filename);
+
+      if (fs.existsSync(filePath)) {
+        // 파일이 다른 프로세스에 의해 잠겨있지 않은지 확인
+        try {
+          const fileHandle = fs.openSync(filePath, 'r');
+          fs.closeSync(fileHandle);
+
+          // 파일 삭제
+          fs.unlinkSync(filePath);
+          logger.logFile('삭제', filePath, { reason: '다운로드 취소' });
+        } catch (fileError) {
+          logger.warn('File', `파일 접근 오류, 강제 삭제 시도`, { path: filePath, error: fileError });
+          // 강제 삭제 시도
+          try {
+            fs.rmSync(filePath, { force: true });
+            logger.logFile('강제 삭제', filePath, { reason: '다운로드 취소' });
+          } catch (removeError) {
+            logger.error('File', `파일 강제 삭제 실패`, { path: filePath, error: removeError });
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Download', '취소된 다운로드 파일 삭제 실패', { error });
     }
-    return false;
+
+    activeDownload = null;
+    return true;
   });
 
   // 이어받기 가능 여부 확인
-  ipcMain.handle('check-resume-available', async (event, fileUrl: string) => {
+  ipcMain.handle('check-resume-available', async (): Promise<{canResume: boolean, reason: string}> => {
     // 이어받기 기능 제거로 항상 false 반환
     return {
       canResume: false,
@@ -536,10 +601,9 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
   });
 
   // 다운로드 이벤트 전송
-  ipcMain.handle('send-download-event', async (event, downloadEvent) => {
+  ipcMain.handle('send-download-event', async (_event, downloadEvent) => {
     // 여기서 다운로드 이벤트를 외부 서비스에 보내는 로직을 구현할 수 있습니다
-    console.log('Download event:', downloadEvent);
-    return;
+    logger.logDownload('이벤트', downloadEvent.url || 'unknown', downloadEvent);
   });
 }
 
@@ -560,10 +624,12 @@ function createWindow(): BrowserWindow {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    logger.logAppEvent('창 표시됨', { id: mainWindow.id })
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
+    logger.logAppEvent('외부 링크 열기', { url: details.url })
     return { action: 'deny' }
   })
 
@@ -574,8 +640,10 @@ function createWindow(): BrowserWindow {
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    logger.info('System', '개발 모드로 앱 시작', { url: process.env['ELECTRON_RENDERER_URL'] })
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    logger.info('System', '프로덕션 모드로 앱 시작')
   }
 
   // 다운로드 핸들러 설정
@@ -593,14 +661,14 @@ app.whenReady().then(() => {
 
   if (!gotTheLock) {
     // 이미 다른 인스턴스가 실행 중이면 현재 인스턴스 종료
-    console.log('이미 다른 인스턴스가 실행 중입니다. 프로그램을 종료합니다.')
+    logger.warn('System', '이미 다른 인스턴스가 실행 중. 프로그램 종료')
     app.quit()
     return
   }
 
   // 두 번째 인스턴스가 시작될 때 기존 창에 포커스
   app.on('second-instance', () => {
-    console.log('두 번째 인스턴스 감지: 기존 창을 활성화합니다.')
+    logger.info('System', '두 번째 인스턴스 감지: 기존 창 활성화')
     const windows = BrowserWindow.getAllWindows()
     if (windows.length) {
       const mainWindow = windows[0]
@@ -614,6 +682,11 @@ app.whenReady().then(() => {
 
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
+  logger.info('System', '앱 초기화 완료', {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch
+  })
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -623,10 +696,9 @@ app.whenReady().then(() => {
   })
 
   // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  ipcMain.on('ping', () => logger.debug('IPC', 'ping-pong 테스트', { response: 'pong' }))
 
-  // 메인 윈도우 생성
-  const mainWindow = createWindow()
+  createWindow()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
@@ -639,10 +711,13 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  logger.info('System', '모든 창이 닫힘, 앱 종료')
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
-// In this file you can include the rest of your app"s specific main process
-// code. You can also put them in separate files and require them here.
+// 앱 종료 이벤트
+app.on('will-quit', () => {
+  logger.info('System', '앱 종료 중')
+})
