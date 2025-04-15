@@ -50,7 +50,7 @@ function DesignEditor(): JSX.Element {
       colors: { ...prev.colors, [key]: value }
     }))
 
-    // 미리보기 스타일 업데이트
+    // Update preview styles
     updatePreviewStyles({
       ...theme,
       colors: { ...theme.colors, [key]: value }
@@ -63,7 +63,7 @@ function DesignEditor(): JSX.Element {
       [key]: value
     }))
 
-    // 미리보기 스타일 업데이트
+    // Update preview styles
     updatePreviewStyles({
       ...theme,
       [key]: value
@@ -95,17 +95,17 @@ function DesignEditor(): JSX.Element {
     })
   }
 
-  // 초기 스타일 설정
+  // Initial style setup
   useEffect(() => {
     updatePreviewStyles(theme)
   }, [])
 
   const saveTheme = () => {
-    // 중요 설정만 포함한 간결한 출력 객체 생성
+    // Create a concise output object with only important settings
     const outputTheme = {
       colors: theme.colors,
       backgroundImage: theme.backgroundImage.startsWith('data:image')
-        ? '[Uploaded Image Data]' // 데이터 URL이 너무 길면 간략하게 표시
+        ? '[Uploaded Image Data]' // Display a summary if data URL is too long
         : theme.backgroundImage,
       titleColor: theme.titleColor
     }
@@ -134,18 +134,19 @@ function DesignEditor(): JSX.Element {
   }
 
   return (
-    <div className="container mx-auto p-4 text-sm">
-      <h1 className="text-2xl font-bold mb-6">Design Editor</h1>
+    <div className="container mx-auto p-4 text-xs">
+      <h1 className="text-xl font-bold mb-2">Design Editor</h1>
+      <p className="text-xs text-gray-500 mb-4">Customize your game launcher appearance and style</p>
 
       <div className="flex flex-col space-y-6">
-        {/* 위쪽: 미리보기 영역 */}
+        {/* Preview area at the top */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Preview</CardTitle>
+            <CardTitle className="text-base">Preview</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="border rounded-lg overflow-hidden shadow-md" style={previewStyle}>
-              {/* 배경 이미지 영역 */}
+              {/* Background image area */}
               <div className="flex-1 bg-gray-900 relative overflow-hidden">
                 <div
                   className="absolute inset-0 flex items-center justify-center"
@@ -158,11 +159,11 @@ function DesignEditor(): JSX.Element {
                 ></div>
               </div>
 
-              {/* 하단 다운로드 정보 영역 */}
+              {/* Download information area at the bottom */}
               <div className="p-4 bg-white border-t" style={{ backgroundColor: theme.colors.background, borderColor: theme.colors.border }}>
                 <div className="flex items-center justify-between h-full">
                   <div className="flex-1 mr-4 space-y-2">
-                    <div className="flex justify-between text-sm" style={{ color: theme.colors.text }}>
+                    <div className="flex justify-between text-xs" style={{ color: theme.colors.text }}>
                       <span>Preparing file download...</span>
                       <span>Time remaining: Calculating...</span>
                     </div>
@@ -182,7 +183,7 @@ function DesignEditor(): JSX.Element {
                         }}
                       ></div>
                     </div>
-                    <div className="flex justify-between text-xs" style={{ color: theme.colors.text }}>
+                    <div className="flex justify-between text-[10px]" style={{ color: theme.colors.text }}>
                       <span>Download speed: 0 KB/s</span>
                       <span>0%</span>
                     </div>
@@ -206,10 +207,10 @@ function DesignEditor(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* 아래쪽: 설정 영역 (탭 형태) */}
+        {/* Settings area at the bottom (tabbed interface) */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Design Settings</CardTitle>
+            <CardTitle className="text-base">Design Settings</CardTitle>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="images">
@@ -219,7 +220,7 @@ function DesignEditor(): JSX.Element {
                 <TabsTrigger value="background" className="text-xs">Background Settings</TabsTrigger>
               </TabsList>
 
-              {/* 이미지 설정 탭 */}
+              {/* Image settings tab */}
               <TabsContent value="images">
                 <div className="space-y-3">
                   <div className="space-y-1">
@@ -249,7 +250,7 @@ function DesignEditor(): JSX.Element {
                 </div>
               </TabsContent>
 
-              {/* 버튼 설정 탭 */}
+              {/* Button settings tab */}
               <TabsContent value="buttons">
                 <div className="space-y-3">
                   <div className="space-y-1">
@@ -273,7 +274,7 @@ function DesignEditor(): JSX.Element {
                 </div>
               </TabsContent>
 
-              {/* 배경 설정 탭 */}
+              {/* Background settings tab */}
               <TabsContent value="background">
                 <div className="space-y-3">
                   <div className="space-y-1">
@@ -319,21 +320,21 @@ function DesignEditor(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* 저장 버튼을 하단으로 이동 */}
+        {/* Save button moved to the bottom */}
         <Button onClick={saveTheme} className="w-full h-10">Save Changes</Button>
       </div>
 
-      {/* JSON 출력 다이얼로그 */}
+      {/* JSON output dialog */}
       <Dialog open={showJsonDialog} onOpenChange={setShowJsonDialog}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-auto">
           <DialogHeader>
-            <DialogTitle className="text-base">Theme Settings JSON</DialogTitle>
-            <DialogDescription className="text-xs">
+            <DialogTitle className="text-sm">Theme Settings JSON</DialogTitle>
+            <DialogDescription className="text-[10px]">
               Copy the JSON code below to save your settings.
             </DialogDescription>
           </DialogHeader>
           <div className="bg-gray-800 p-4 rounded-md overflow-auto text-white">
-            <pre className="text-xs whitespace-pre-wrap">
+            <pre className="text-[10px] whitespace-pre-wrap">
               {jsonOutput}
             </pre>
           </div>

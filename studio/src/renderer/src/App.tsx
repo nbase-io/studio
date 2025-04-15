@@ -1,74 +1,127 @@
-import { useState } from 'react'
-import Versions from '@/components/Versions'
-import Settings from '@/components/Settings'
-import DesignEditor from '@/components/DesignEditor'
+import React, { useState } from 'react'
+// import './App.css'
+import Builds from './components/Builds'
+import Settings from './components/Settings'
+import DesignEditor from './components/DesignEditor'
+import FileManager from './components/FileManager'
 
 function App(): JSX.Element {
-  const [activePage, setActivePage] = useState<'versions' | 'settings' | 'design'>('versions')
+  const [activePage, setActivePage] = useState<string>('builds')
 
   const renderContent = () => {
     switch (activePage) {
-      case 'versions':
-        return <Versions />
+      case 'builds':
+        return <Builds />
       case 'settings':
         return <Settings />
       case 'design':
         return <DesignEditor />
+      case 'files':
+        return <FileManager />
       default:
-        return <Versions />
+          return <Builds />
     }
   }
 
   return (
-    <div className="h-screen w-full flex bg-background">
-      {/* 왼쪽 사이드바 - 아이콘만 표시 */}
-      <div className="w-14 h-full bg-[#1e1e2d] flex flex-col items-center pt-4">
-        {/* 아이콘 버튼 - 빌드 */}
+    <div className="h-screen flex">
+      {/* 왼쪽 사이드바 메뉴 */}
+      <div className="w-16 border-r flex flex-col items-center py-4 bg-gray-50">
         <button
-          className={`w-10 h-10 mb-3 rounded flex items-center justify-center transition-colors ${
-            activePage === 'versions' ? 'bg-blue-600' : 'bg-transparent hover:bg-[#2e2e3d]'
+          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+            activePage === 'builds' ? 'bg-gray-200' : ''
           }`}
-          onClick={() => setActivePage('versions')}
+          onClick={() => setActivePage('builds')}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+            />
           </svg>
         </button>
-
-        {/* 런처 아이콘 버튼 */}
         <button
-          className={`w-10 h-10 mb-3 rounded flex items-center justify-center transition-colors ${
-            activePage === 'design' ? 'bg-blue-600' : 'bg-transparent hover:bg-[#2e2e3d]'
+          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+            activePage === 'design' ? 'bg-gray-200' : ''
           }`}
           onClick={() => setActivePage('design')}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <path d="M9 3v18" />
-            <path d="M14 8h5" />
-            <path d="M14 12h5" />
-            <path d="M14 16h5" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+            />
           </svg>
         </button>
-
-        {/* 아이콘 버튼 - TV/설정 */}
         <button
-          className={`w-10 h-10 rounded flex items-center justify-center transition-colors ${
-            activePage === 'settings' ? 'bg-blue-600' : 'bg-transparent hover:bg-[#2e2e3d]'
+          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+            activePage === 'files' ? 'bg-gray-200' : ''
+          }`}
+          onClick={() => setActivePage('files')}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+            />
+          </svg>
+        </button>
+        <button
+          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+            activePage === 'settings' ? 'bg-gray-200' : ''
           }`}
           onClick={() => setActivePage('settings')}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
-            <polyline points="17 2 12 7 7 2" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+            />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+            />
           </svg>
         </button>
       </div>
 
-      {/* 오른쪽 콘텐츠 영역 */}
-      <div className="flex-1 overflow-auto">
-        {renderContent()}
+      {/* 메인 콘텐츠 영역 */}
+      <div className="flex-1 flex flex-col">
+          {renderContent()}
       </div>
     </div>
   )

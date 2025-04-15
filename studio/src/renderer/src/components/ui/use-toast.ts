@@ -1,33 +1,72 @@
 // 간단한 Toast 기능 구현 (실제로는 더 복잡한 ToastProvider가 필요)
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
-export interface ToastProps {
-  message: string
-  type?: 'success' | 'error' | 'warning' | 'info'
+export type ToastType = 'default' | 'success' | 'error' | 'warning' | 'destructive'
+
+export interface Toast {
+  id: string
+  title?: string
+  description?: string
+  type?: ToastType
   duration?: number
 }
 
-export function toast(props: ToastProps) {
-  // 실제 구현에서는 더 복잡한 토스트 시스템이 필요합니다.
-  // 여기서는 콘솔에 메시지만 출력하도록 간단히 구현합니다.
-  console.log(`Toast (${props.type || 'info'}): ${props.message}`)
+interface ToastOptions {
+  title?: string
+  description?: string
+  type?: ToastType
+  duration?: number
+  variant?: 'default' | 'destructive'
 }
 
-export const useToast = () => {
-  const [toasts, setToasts] = useState<ToastProps[]>([])
+interface UseToastReturn {
+  toasts: Toast[]
+  toast: (options: ToastOptions) => void
+  dismiss: (id: string) => void
+  dismissAll: () => void
+}
 
-  const addToast = (props: ToastProps) => {
-    const id = Date.now()
-    setToasts((prev) => [...prev, { ...props, id }])
+export const useToast = (): UseToastReturn => {
+  const [toasts, setToasts] = useState<Toast[]>([])
 
-    if (props.duration !== Infinity) {
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((toast) => toast.id !== id))
-      }, props.duration || 3000)
-    }
+  const toast = useCallback(
+    ({ title, description, type = 'default', duration = 5000 }: ToastOptions) => {
+      const id = Math.random().toString(36).substring(2, 9)
+      const newToast: Toast = {
+        id,
+        title,
+        description,
+        type,
+        duration,
+      }
 
-    toast(props)
+      setToasts((prevToasts) => [...prevToasts, newToast])
+
+      if (duration > 0) {
+        setTimeout(() => {
+          dismiss(id)
+        }, duration)
+      }
+
+      return id
+    },
+    []
+  )
+
+  const dismiss = useCallback((id: string) => {
+    setToasts((prevToasts) => prevToasts.filter((toast) => toast.id !== id))
+  }, [])
+
+  const dismissAll = useCallback(() => {
+    setToasts([])
+  }, [])
+
+  return {
+    toasts,
+    toast,
+    dismiss,
+    dismissAll,
   }
-
-  return { toasts, toast: addToast }
 }
+
+export default useToast
