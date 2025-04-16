@@ -576,11 +576,11 @@ export class ApiService {
     try {
       const response = await this.request<{ data: Version }>(`builds/${buildId}/versions`, 'POST', versionData);
 
-      if (!response || !response.data) {
-        throw new Error('Failed to create version');
+      if (!response) {
+        throw new Error(`Failed to create version: ${response}`);
       }
 
-      const version = response.data;
+      const version = response;
 
       // Apply CDN URL to download URLs
       if (this.cdnUrl && version.download_url && !version.download_url.startsWith('http')) {
@@ -639,12 +639,11 @@ export class ApiService {
     try {
       const response = await this.request<{ data: VersionFile }>(`builds/${buildId}/versions/${versionId}/files`, 'POST', fileData);
 
-      if (!response || !response.data) {
+      if (!response) {
         throw new Error('Failed to add file to version');
       }
 
-      const file = response.data;
-
+      const file = response;
       // Apply CDN URL to download URL
       if (this.cdnUrl && file.download_url && !file.download_url.startsWith('http')) {
         file.download_url = `${this.cdnUrl}/${file.download_url.replace(/^\//, '')}`;

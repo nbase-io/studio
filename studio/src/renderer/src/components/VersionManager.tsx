@@ -36,6 +36,12 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
+// 상단에 새로 분리한 컴포넌트들을 임포트
+import AddVersionDialog from './AddVersionDialog';
+import EditVersionDialog from './EditVersionDialog';
+import DeleteVersionDialog from './DeleteVersionDialog';
+import ViewFilesDialog from './ViewFilesDialog';
+
 interface VersionManagerProps {
   buildId: string;
   onBack: () => void;
@@ -258,63 +264,17 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     }
 
     setIsSubmitting(true);
-
-    try {
       // 업로드된 파일 정보 저장
       const uploadedFileData: { url: string, relativePath: string, md5: string, name: string, size: number, type: string, registered: boolean }[] = [];
 
-      // 1단계: 파일을 먼저 S3에 업로드
-      if (uploadedFiles.length > 0) {
-        setIsUploading(true);
-
-        for (const file of uploadedFiles) {
-          try {
-            // 파일 업로드 진행 상태 초기화
-            setUploadProgress(prev => ({
-              ...prev,
-              [file.name]: 0
-            }));
-
-            // S3에 파일 업로드 (uploadFileToS3 함수 내에서 apiService.addFileToVersion 호출됨)
-            const { url, relativePath, md5, registered } = await uploadFileToS3(file, newVersion.id!);
-
-            // 업로드된 파일 정보 저장 (UI 업데이트용)
-            uploadedFileData.push({
-              url,
-              relativePath,
-              md5,
-              name: file.name,
-              size: file.size,
-              type: file.type,
-              registered
-            });
-
-            // 업로드 완료 표시
-            setUploadProgress(prev => ({
-              ...prev,
-              [file.name]: 100
-            }));
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            toast({
-              title: '파일 업로드 실패',
-              description: `${file.name}: ${errorMessage}`,
-              variant: "destructive"
-            });
-
-            // 업로드 실패 시 중단
-            setIsUploading(false);
-            setIsSubmitting(false);
-            return;
-          }
-        }
-
-        setIsUploading(false);
-      }
-
-      // 2단계: 버전 생성
+      // 1단계: 버전 생성
       try {
         const createdVersion = await apiService.createVersion(buildId, newVersion);
+        if (!createdVersion.id) {
+          throw new Error('Failed to create version');
+        } else {
+          newVersion.id = createdVersion.id;
+        }
 
         // 파일 정보는 이미 uploadFileToS3 내에서 저장되었으므로 추가 호출 필요 없음
 
@@ -324,16 +284,6 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
           description: `버전 ${createdVersion.versionCode}가 생성되었습니다.`
         });
 
-        // 다이얼로그 닫기 및 상태 초기화
-        setShowAddDialog(false);
-        setNewVersion({
-          buildId: buildId,
-          versionCode: '',
-          versionName: '',
-          changeLog: '',
-          status: 'draft'
-        });
-        setUploadedFiles([]);
 
         // 버전 목록 새로고침
         await loadVersions();
@@ -358,6 +308,97 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         });
         console.error('Error adding version:', err);
       }
+
+    try {
+      if (!newVersion.id) {
+        throw new Error('Version ID is required');
+      }
+      // 1단계: 파일을 먼저 S3에 업로드
+      if (uploadedFiles.length > 0) {
+        setIsUploading(true);
+
+        for (const file of uploadedFiles) {
+          try {
+            // 파일 업로드 진행 상태 초기화
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: 0
+            }));
+
+            // S3에 파일 업로드 (uploadFileToS3 함수 내에서 apiService.addFileToVersion 호출됨)
+            const { url, relativePath, md5, size } = await uploadFileToS3(file, newVersion.id!);
+
+            // 업로드된 파일 정보 저장 (UI 업데이트용)
+            uploadedFileData.push({
+              url,
+              relativePath,
+              md5,
+              name: file.name,
+              size,
+              type: file.type,
+              registered: false // 이제 S3 업로드 후 별도로 등록 필요
+            });
+
+            // 업로드 완료 표시
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: 100
+            }));
+
+            uploadedFileData.forEach(async (fileData) => {
+              await apiService.addFileToVersion(buildId, newVersion.id, {
+                name: fileData.name,
+                size: fileData.size,
+                fileSize: fileData.size,
+                download_url: fileData.url,
+                md5_hash: fileData.md5,
+                fileType: fileData.type,
+                fileName: fileData.name,
+                originalName: fileData.name,
+                filePath: fileData.relativePath,
+              });
+            });
+
+            setNewVersion({
+              buildId: buildId,
+              versionCode: '',
+              versionName: '',
+              changeLog: '',
+              status: 'draft'
+            });
+            setUploadedFiles([]);
+            await loadVersions();
+            setShowAddDialog(false);
+
+
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            toast({
+              title: '파일 업로드 실패',
+              description: `${file.name}: ${errorMessage}`,
+              variant: "destructive"
+            });
+
+            // 업로드 실패 시 중단
+            setIsUploading(false);
+            setIsSubmitting(false);
+            return;
+          }
+        }
+
+        setIsUploading(false);
+      } else {
+
+        setNewVersion({
+          buildId: buildId,
+          versionCode: '',
+          versionName: '',
+          changeLog: '',
+          status: 'draft'
+        });
+        setUploadedFiles([]);
+      }
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       toast({
@@ -424,10 +465,10 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     }
 
     setIsSubmitting(true);
+    const uploadedFileData: { url: string, relativePath: string, md5: string, name: string, size: number, type: string, registered: boolean }[] = [];
 
     try {
       // 업로드된 파일 정보 저장
-      const uploadedFileData: { url: string, relativePath: string, md5: string, name: string, size: number, type: string, registered: boolean }[] = [];
 
       // 1단계: 파일을 먼저 S3에 업로드
       if (uploadedFiles.length > 0) {
@@ -442,7 +483,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
             }));
 
             // S3에 파일 업로드 (uploadFileToS3 함수 내에서 apiService.addFileToVersion 호출됨)
-            const { url, relativePath, md5, registered } = await uploadFileToS3(file, selectedVersion.id!);
+            const { url, relativePath, md5, size } = await uploadFileToS3(file, selectedVersion.id!);
 
             // 업로드된 파일 정보 저장 (UI 업데이트용)
             uploadedFileData.push({
@@ -450,16 +491,38 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
               relativePath,
               md5,
               name: file.name,
-              size: file.size,
+              size,
               type: file.type,
-              registered
+              registered: false // 이제 S3 업로드 후 별도로 등록 필요
             });
 
+            await apiService.addFileToVersion(buildId, selectedVersion.id, {
+              name: file.name,
+              size: file.size,
+              fileSize: file.size,
+              download_url: url,
+              md5_hash: md5,
+              fileType: file.type,
+              fileName: file.name,
+              originalName: file.name,
+              filePath: relativePath,
+            });
             // 업로드 완료 표시
             setUploadProgress(prev => ({
               ...prev,
               [file.name]: 100
             }));
+
+            //Selected Files  초기화
+            setUploadedFiles([]);
+            setFilesToDelete([]);
+            await loadVersions();
+            setShowAddDialog(false);
+            toast({
+              title: '파일 업로드 완료',
+              description: `${file.name} 업로드 완료`,
+              variant: "default"
+            });
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             toast({
@@ -619,7 +682,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
 
       // 설정이 없으면 오류 처리
       if (!s3Config) {
-        toast({
+      toast({
           title: 'S3 설정 없음',
           description: 'S3 설정이 구성되지 않았습니다. 설정에서 S3 정보를 구성해주세요.',
           variant: "destructive"
@@ -671,7 +734,20 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       }
 
       const { bucket, region, accessKeyId, secretAccessKey, cdnUrl } = s3Config;
-      const key = `versions/${versionId}/${file.name}`;
+
+      // 랜덤 4자리 문자열 생성
+      const randomPrefix = Math.random().toString(36).substring(2, 6);
+
+      // 파일 이름에서 확장자 추출
+      const originalName = file.name;
+      const fileExtension = originalName.includes('.') ?
+        originalName.substring(originalName.lastIndexOf('.')) : '';
+      const fileNameWithoutExt = originalName.includes('.') ?
+        originalName.substring(0, originalName.lastIndexOf('.')) : originalName;
+
+      // 새 파일 이름 생성 (xxxx_파일명.확장자)
+      const newFileName = `${randomPrefix}_${fileNameWithoutExt}${fileExtension}`;
+      const key = `versions/${versionId}/${newFileName}`;
 
       // 임시 파일 생성
       tempFilePath = await window.api.createTempFile({
@@ -694,6 +770,12 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       const totalChunks = Math.ceil(file.size / chunkSize);
 
       console.log(`파일 ${file.name} 업로드 시작: 총 ${totalChunks}개 청크, 총 크기 ${formatFileSize(file.size)}`);
+
+      // 진행률 초기화
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 0
+      }));
 
       for (let i = 0; i < totalChunks; i++) {
         const start = i * chunkSize;
@@ -719,9 +801,22 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
           setIsUploading(false);
           throw new Error(result.error);
         }
+
+        // 청크 업로드 후 진행률 업데이트
+        const progress = Math.round(((i + 1) / totalChunks) * 50); // 청크 업로드는 전체 진행률의 50%로 계산
+        setUploadProgress(prev => ({
+          ...prev,
+          [file.name]: progress
+        }));
       }
 
       console.log(`모든 청크 처리 완료. S3 업로드 시작: ${file.name}`);
+
+      // 진행률 표시 (청크 조합 완료 = 50% 진행)
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 50
+      }));
 
       // 임시 파일을 S3에 업로드
       const uploadResult = await window.api.uploadFileToS3({
@@ -743,6 +838,12 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         setIsUploading(false);
         throw new Error(uploadResult.error);
       }
+
+      // S3 업로드 완료 시 진행률 100%로 설정
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 100
+      }));
 
       console.log(`S3 업로드 완료: ${file.name} -> ${key}`);
 
@@ -977,15 +1078,20 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       return
     }
 
+    const versionId = newVersion.id; // ID를 별도 변수에 저장 (타입 에러 방지)
+
     setIsUploading(true)
-    const uploadedFileData: { url: string, relativePath: string, md5: string, name: string, size: number, registered: boolean }[] = []
+    const uploadedFileData: { url: string, relativePath: string, md5: string, name: string, size: number, registered: boolean, originalName?: string }[] = []
     let allFilesRegistered = true;
 
     try {
       // 1단계: 모든 파일을 S3에 업로드
       for (const file of uploadedFiles) {
+        // 원본 파일명 확인 (확장된 File 객체인 경우)
+        const originalName = (file as any).originalName || file.name;
+
         // S3에 파일 업로드 (API 서버 등록은 하지 않음)
-        const { url, relativePath, md5, size } = await uploadFileToS3(file, newVersion.id!);
+        const { url, relativePath, md5, size } = await uploadFileToS3(file, versionId);
 
         // 업로드된 파일 데이터 저장
         uploadedFileData.push({
@@ -994,7 +1100,8 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
           md5,
           name: file.name,
           size,
-          registered: false // 아직 등록되지 않음
+          registered: false, // 아직 등록되지 않음
+          originalName // 원본 파일명 저장
         })
       }
 
@@ -1012,14 +1119,15 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
 
           while (retryCount < maxRetries && !success) {
             try {
-              await apiService.addFileToVersion(buildId, newVersion.id!, {
+              await apiService.addFileToVersion(buildId, versionId, {
                 name: fileData.name,
                 size: fileData.size,
+                fileSize: fileData.size,
                 download_url: fileData.relativePath,
                 md5_hash: fileData.md5,
                 fileType: uploadedFiles[i].type,
                 fileName: fileData.name,
-                originalName: fileData.name,
+                originalName: fileData.originalName || fileData.name, // 원본 파일명 사용
                 filePath: fileData.relativePath,
               });
 
@@ -1049,11 +1157,11 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
 
       // 모든 파일이 성공적으로 업로드 및 등록되었는지 확인
       if (allFilesRegistered) {
-        // 성공 메시지 표시
-        toast({
-          title: "업로드 완료",
-          description: `${uploadedFiles.length}개 파일 업로드가 완료되었습니다.`,
-        })
+      // 성공 메시지 표시
+      toast({
+        title: "업로드 완료",
+        description: `${uploadedFiles.length}개 파일 업로드가 완료되었습니다.`,
+      })
       } else {
         // 일부 파일 등록 실패 메시지
         toast({
@@ -1287,61 +1395,60 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
   }
 
   return (
-    <div className="p-4">
-      {/* 상단 헤더 */}
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={onBack} className="h-7 text-xs">
-            <ChevronLeft className="h-3 w-3 mr-1" />
-          </Button>
-          <div>
-            <h1 className="text-lg font-bold">{build.name}</h1>
-            <p className="text-xs text-gray-500">Version: {build.version} | Platform: {build.platform}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* 버전 목록 */}
+    <div>
       <Card>
-        <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-sm">Version List</CardTitle>
-            <CardDescription className="text-xs">
-              Total {totalCount} versions
-            </CardDescription>
+        <CardHeader className="p-4">
+          <div className="flex items-center">
+            <Button variant="outline" onClick={onBack} className="h-7 w-7 p-0 mr-2 rounded-full">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <CardTitle className="text-lg">{build?.name || 'Version Management'}</CardTitle>
+              <CardDescription className="text-sm">
+                {build ? `Manage versions for ${build.name}` : 'Loading...'}
+              </CardDescription>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-
-            <Button size="sm" onClick={() => {
-              setShowAddDialog(true)
-              setFormErrors({})
-            }} className="h-7 text-xs">
+          <div className="flex space-x-2">
+            <Button
+              onClick={() => {
+                setShowAddDialog(true)
+                setFormErrors({})
+                setUploadedFiles([])
+              }}
+              className="text-xs h-8"
+            >
               <Plus className="h-3 w-3 mr-1" />
-              Add New Version
+              Add Version
             </Button>
             <Button
-              size="sm"
+              onClick={() => loadVersions()}
               variant="outline"
-              onClick={loadVersions}
-              className="h-7 text-xs"
+              className="text-xs h-8"
               disabled={loading}
             >
-              <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
-
+              <RefreshCw className={cn("h-3 w-3 mr-1", { "animate-spin": loading })} />
+              Refresh
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="border rounded-md">
+        <CardContent className="p-0">
+          {error && (
+            <div className="p-4 flex items-center space-x-2 text-red-600 bg-red-50">
+              <AlertTriangle className="h-4 w-4" />
+              <div className="text-sm">{error}</div>
+            </div>
+          )}
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="h-8">
-                  <TableHead className="w-[80px] text-[9px] py-1 px-2">Status</TableHead>
-                  <TableHead className="w-[120px] text-[9px] py-1 px-2">Version</TableHead>
-                  <TableHead className="text-[9px] py-1 px-2">Description</TableHead>
-                  <TableHead className="w-[100px] text-[9px] py-1 px-2">Files</TableHead>
-                  <TableHead className="w-[120px] text-[9px] py-1 px-2">Created</TableHead>
-                  <TableHead className="w-[150px] text-right text-[9px] py-1 px-2">Actions</TableHead>
+                  <TableHead className="py-1 px-2 text-[8px]">Status</TableHead>
+                  <TableHead className="py-1 px-2 text-[8px]">Version</TableHead>
+                  <TableHead className="py-1 px-2 text-[8px]">Change Log</TableHead>
+                  <TableHead className="py-1 px-2 text-[8px]">Files</TableHead>
+                  <TableHead className="py-1 px-2 text-[8px]">Created</TableHead>
+                  <TableHead className="text-right py-1 px-2 text-[8px]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1456,682 +1563,64 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         </CardFooter>
       </Card>
 
-      {/* 새 버전 추가 다이얼로그 */}
-      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Add New Version</DialogTitle>
-            <DialogDescription className="text-xs">
-              Add new version information and upload files.
-            </DialogDescription>
-          </DialogHeader>
+      {/* 분리된 다이얼로그 컴포넌트 사용 */}
+      <AddVersionDialog
+        showDialog={showAddDialog}
+        setShowDialog={setShowAddDialog}
+        newVersion={newVersion}
+        setNewVersion={setNewVersion}
+        formErrors={formErrors}
+        uploadedFiles={uploadedFiles}
+        setUploadedFiles={setUploadedFiles}
+        uploadProgress={uploadProgress}
+        isSubmitting={isSubmitting}
+        isUploading={isUploading}
+        handleAddVersion={handleAddVersion}
+        handleUploadAllFiles={handleUploadAllFiles}
+        handleDragOver={handleDragOver}
+        handleDragLeave={handleDragLeave}
+        handleDrop={handleDrop}
+        handleRemoveFile={handleRemoveFile}
+        handleFileSelect={handleFileSelect}
+      />
 
-          {/* 버전 정보 입력 폼 */}
-          <div className="grid gap-4">
-            {/* Code, Name, Status 한 줄로 표시 */}
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="versionCode" className="text-xs mb-1 block">
-                  Code
-                </Label>
-                <Input
-                  id="versionCode"
-                  placeholder="1.0.1"
-                  className="text-xs h-8 w-full"
-                  value={newVersion.versionCode}
-                  onChange={(e) => setNewVersion(prev => ({ ...prev, versionCode: e.target.value }))}
-                />
-                {formErrors.versionCode && (
-                  <div className="text-xs text-red-500 mt-1">
-                    {formErrors.versionCode}
-                  </div>
-                )}
-              </div>
+      <EditVersionDialog
+        showDialog={showEditDialog}
+        setShowDialog={setShowEditDialog}
+        selectedVersion={selectedVersion}
+        setSelectedVersion={setSelectedVersion}
+        editFormErrors={editFormErrors}
+        uploadedFiles={uploadedFiles}
+        setUploadedFiles={setUploadedFiles}
+        uploadProgress={uploadProgress}
+        isSubmitting={isSubmitting}
+        isUploading={isUploading}
+        filesToDelete={filesToDelete}
+        setFilesToDelete={setFilesToDelete}
+        handleUpdateVersion={handleUpdateVersion}
+        handleDragOver={handleDragOver}
+        handleDragLeave={handleDragLeave}
+        handleDrop={handleDrop}
+        handleRemoveFile={handleRemoveFile}
+        handleFileSelect={handleFileSelect}
+        formatFileSize={formatFileSize}
+        toast={toast}
+      />
 
-              <div>
-                <Label htmlFor="versionName" className="text-xs mb-1 block">
-                  Name
-                </Label>
-                <Input
-                  id="versionName"
-                  placeholder="First Release"
-                  className="text-xs h-8 w-full"
-                  value={newVersion.versionName}
-                  onChange={(e) => setNewVersion(prev => ({ ...prev, versionName: e.target.value }))}
-                />
-                {formErrors.versionName && (
-                  <div className="text-xs text-red-500 mt-1">
-                    {formErrors.versionName}
-                  </div>
-                )}
-              </div>
+      <DeleteVersionDialog
+        showDialog={showDeleteDialog}
+        setShowDialog={setShowDeleteDialog}
+        selectedVersion={selectedVersion}
+        isSubmitting={isSubmitting}
+        handleDeleteVersion={handleDeleteVersion}
+      />
 
-              <div>
-                <Label htmlFor="status" className="text-xs mb-1 block">
-                  Status
-                </Label>
-                <Select
-                  value={newVersion.status}
-                  onValueChange={(value) => setNewVersion(prev => ({ ...prev, status: value as any }))}
-                >
-                  <SelectTrigger className="text-xs h-8 w-full">
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="development" className="text-xs">Development</SelectItem>
-                    <SelectItem value="draft" className="text-xs">Draft</SelectItem>
-                    <SelectItem value="published" className="text-xs">Published</SelectItem>
-                    <SelectItem value="archived" className="text-xs">Archived</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* 파일 업로드 UI - 먼저 표시 */}
-            <div className="col-span-3">
-              <div
-                className="border-2 border-dashed border-gray-300 rounded-md p-6 text-center mb-4 transition-colors duration-200"
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <UploadCloud className="mx-auto h-8 w-8 text-gray-400" />
-                <div className="mt-2">
-                  <label htmlFor="file-upload" className="cursor-pointer inline-flex items-center px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100">
-                    <FilePlus className="h-3 w-3 mr-1" />
-                    Select Files
-                  </label>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    multiple
-                    className="hidden"
-                    ref={fileInputRef}
-                    onChange={handleFileSelect}
-                  />
-                  <p className="mt-1 text-xs text-gray-500">
-                    Or drop files here
-                  </p>
-                </div>
-              </div>
-
-              {/* 선택된 파일 목록 */}
-              {uploadedFiles.length > 0 && (
-                <div className="mb-4">
-                  <div className="text-xs font-medium mb-2">Selected Files ({uploadedFiles.length})</div>
-                  <div className="max-h-40 overflow-y-auto border rounded-md">
-                    {uploadedFiles.map((file, index) => (
-                      <div key={index} className="flex items-center justify-between p-2 hover:bg-gray-50 border-b last:border-b-0">
-                        <div className="flex items-center space-x-2 flex-1">
-                          <File className="h-3 w-3 text-blue-500" />
-                          <div className="text-xs flex-1 truncate" title={file.name}>
-                            {file.name}
-                          </div>
-                          <div className="text-[9px] text-gray-500">
-                            {(file.size / 1024 / 1024).toFixed(2)} MB
-                          </div>
-                        </div>
-
-                        {/* 업로드 진행률 */}
-                        {uploadProgress[file.name] && uploadProgress[file.name] > 0 ? (
-                          <div className="w-24 bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className="bg-blue-500 h-1.5"
-                              style={{ width: `${uploadProgress[file.name]}%` }}
-                            ></div>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveFile(index)}
-                            className="text-gray-500 hover:text-red-500"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 설명 필드를 가장 아래로 이동 */}
-            <div className="grid grid-cols-4 items-center gap-4 col-span-3">
-              <Textarea
-                id="changeLog"
-                placeholder="Version ChangeLog"
-                className="col-span-4 h-20 text-xs"
-                value={newVersion.changeLog || ''}
-                onChange={(e) => setNewVersion(prev => ({ ...prev, changeLog: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddDialog(false)} className="text-xs h-8">
-              Cancel
-            </Button>
-
-            {!newVersion?.id ? (
-              <Button
-                type="submit"
-                onClick={handleAddVersion}
-                disabled={isSubmitting || isUploading}
-                className="text-xs h-8"
-              >
-                {isSubmitting || isUploading ? (
-                  <>
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    {isUploading ? 'Uploading...' : 'Adding...'}
-                  </>
-                ) : 'Add Version'}
-              </Button>
-            ) : (
-              <Button
-                onClick={handleUploadAllFiles}
-                disabled={isUploading || uploadedFiles.length === 0}
-                className="text-xs h-8"
-              >
-                {isUploading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                Upload Files ({uploadedFiles.length})
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 버전 수정 다이얼로그 */}
-      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Edit Version</DialogTitle>
-            <DialogDescription className="text-xs">
-              Modify version information
-            </DialogDescription>
-          </DialogHeader>
-          {selectedVersion && (
-            <div className="grid gap-4 py-4">
-              {/* Code, Name, Status 한 줄로 표시 */}
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="edit-version" className="text-xs mb-1 block">
-                    Code
-                  </Label>
-                  <Input
-                    id="edit-version"
-                    placeholder="1.0.1"
-                    className="text-xs h-8 w-full"
-                    value={selectedVersion.versionCode}
-                    onChange={(e) => setSelectedVersion({ ...selectedVersion, versionCode: e.target.value })}
-                  />
-                  {editFormErrors.versionCode && (
-                    <div className="text-xs text-red-500 mt-1">
-                      {editFormErrors.versionCode}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <Label htmlFor="edit-name" className="text-xs mb-1 block">
-                    Name
-                  </Label>
-                  <Input
-                    id="edit-name"
-                    placeholder="Release name"
-                    className="text-xs h-8 w-full"
-                    value={selectedVersion.versionName}
-                    onChange={(e) => setSelectedVersion({ ...selectedVersion, versionName: e.target.value })}
-                  />
-                  {editFormErrors.versionName && (
-                    <div className="text-xs text-red-500 mt-1">
-                      {editFormErrors.versionName}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <Label htmlFor="edit-status" className="text-xs mb-1 block">
-                    Status
-                  </Label>
-                  <Select
-                    value={selectedVersion.status}
-                    onValueChange={(value) => setSelectedVersion({ ...selectedVersion, status: value as any })}
-                  >
-                    <SelectTrigger className="text-xs h-8 w-full">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="development" className="text-xs">Development</SelectItem>
-                      <SelectItem value="draft" className="text-xs">Draft</SelectItem>
-                      <SelectItem value="published" className="text-xs">Published</SelectItem>
-                      <SelectItem value="archived" className="text-xs">Archived</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {editFormErrors.status && (
-                    <div className="text-xs text-red-500 mt-1">
-                      {editFormErrors.status}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* ChangeLog */}
-              <div>
-                <Textarea
-                  id="edit-changeLog"
-                  placeholder="Version ChangeLog"
-                  className="h-20 text-xs w-full"
-                  value={selectedVersion.changeLog || ''}
-                  onChange={(e) => setSelectedVersion({ ...selectedVersion, changeLog: e.target.value })}
-                />
-                {editFormErrors.changeLog && (
-                  <div className="text-xs text-red-500 mt-1">
-                    {editFormErrors.changeLog}
-                  </div>
-                )}
-              </div>
-
-              {/* 파일 업로드 UI 추가 */}
-              <div>
-                <Label className="text-xs mb-1 block">Files</Label>
-                <div
-                  className="border-2 border-dashed border-gray-300 rounded-md p-4 text-center mb-4 transition-colors duration-200"
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                >
-                  <UploadCloud className="mx-auto h-6 w-6 text-gray-400" />
-                  <div className="mt-2">
-                    <label htmlFor="edit-file-upload" className="cursor-pointer inline-flex items-center px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100">
-                      <FilePlus className="h-3 w-3 mr-1" />
-                      Select Files
-                    </label>
-                    <input
-                      id="edit-file-upload"
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={handleFileSelect}
-                    />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Or drop files here
-                    </p>
-                  </div>
-                </div>
-
-                {/* 선택된 파일 목록 */}
-                {uploadedFiles.length > 0 && (
-                  <div className="mb-4">
-                    <div className="text-xs font-medium mb-2">Selected Files ({uploadedFiles.length})</div>
-                    <div className="max-h-40 overflow-y-auto border rounded-md">
-                      {uploadedFiles.map((file, index) => (
-                        <div key={index} className="flex items-center justify-between p-2 hover:bg-gray-50 border-b last:border-b-0">
-                          <div className="flex items-center space-x-2 flex-1">
-                            <File className="h-3 w-3 text-blue-500" />
-                            <div className="text-xs flex-1 truncate" title={file.name}>
-                              {file.name}
-                            </div>
-                            <div className="text-[9px] text-gray-500">
-                              {(file.size / 1024 / 1024).toFixed(2)} MB
-                            </div>
-                          </div>
-
-                          {/* 업로드 진행률 */}
-                          {uploadProgress[file.name] && uploadProgress[file.name] > 0 ? (
-                            <div className="w-24 bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                              <div
-                                className="bg-blue-500 h-1.5"
-                                style={{ width: `${uploadProgress[file.name]}%` }}
-                              ></div>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveFile(index)}
-                              className="text-gray-500 hover:text-red-500"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 기존 파일 목록 - 삭제 기능 포함 */}
-                {selectedVersion.files && selectedVersion.files.files && selectedVersion.files.files.length > 0 ? (
-                  <div className="mb-4">
-                    <div className="text-xs font-medium mb-2">
-                      현재 파일 목록 ({selectedVersion.files?.totalCount || selectedVersion.files?.files.length}개)
-                      {selectedVersion.files?.totalSize ? ` (총 ${formatFileSize(selectedVersion.files?.totalSize)})` : ''}
-                    </div>
-                    <div className="max-h-40 overflow-y-auto border rounded-md">
-                      {selectedVersion.files.files.map((file) => (
-                        <div key={file.id} className="flex items-center justify-between p-2 hover:bg-gray-50 border-b last:border-b-0">
-                          <div className="flex items-center space-x-2 flex-1">
-                            <File className="h-3 w-3 text-blue-500" />
-                            <div className="text-xs flex-1 truncate" title={file.name || file.fileName}>
-                              {file.name || file.fileName}
-                            </div>
-                            <div className="text-[9px] text-gray-500">
-                              {formatFileSize(file.size || file.fileSize || 0)}
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (file.download_url) {
-                                  window.open(file.download_url, '_blank')
-                                }
-                              }}
-                              className="text-blue-500 hover:text-blue-600"
-                            >
-                              <Download className="h-3 w-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!file.id) return;
-
-                                // 삭제할 파일 목록에 추가
-                                setFilesToDelete(prev => [...prev, file]);
-
-                                // UI에서만 일단 제거 (저장 전까지 실제 삭제되지 않음)
-                                setSelectedVersion({
-                                  ...selectedVersion,
-                                  files: {
-                                    ...selectedVersion.files!,
-                                    totalCount: (selectedVersion.files?.totalCount || 0) - 1,
-                                    totalSize: (selectedVersion.files?.totalSize || 0) - (file.size || file.fileSize || 0),
-                                    files: selectedVersion.files!.files.filter(f => f.id !== file.id)
-                                  }
-                                });
-
-                                toast({
-                                  title: '삭제 대기',
-                                  description: `${file.name || file.fileName} 파일이 삭제 목록에 추가되었습니다. 저장 시 완전히 삭제됩니다.`
-                                });
-                              }}
-                              className="text-red-500 hover:text-red-600"
-                            >
-                              <Trash className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mb-4">
-                    <div className="text-xs font-medium mb-2">현재 파일 목록</div>
-                    <div className="p-4 text-center border rounded-md">
-                      <div className="text-xs text-gray-500">등록된 파일이 없습니다.</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowEditDialog(false)
-                setUploadedFiles([])
-              }}
-              disabled={isSubmitting}
-              className="text-xs h-8"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdateVersion}
-              disabled={isSubmitting || isUploading}
-              className="text-xs h-8"
-            >
-              {isSubmitting || isUploading ? (
-                <>
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  {isUploading ? 'Uploading...' : 'Updating...'}
-                </>
-              ) : 'Save'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 버전 삭제 확인 다이얼로그 */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent className="sm:max-w-[450px]">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Delete Version</DialogTitle>
-            <DialogDescription className="text-xs">
-              Are you sure you want to delete this version? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedVersion && (
-            <div className="py-4">
-              <Alert variant="destructive" className="mb-4">
-                <AlertDescription className="text-xs">
-                  Version <span className="font-bold">{selectedVersion.versionCode}</span> will be deleted.
-                  All files associated with this version will also be removed.
-                </AlertDescription>
-              </Alert>
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowDeleteDialog(false)}
-              disabled={isSubmitting}
-              className="text-xs h-8"
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteVersion}
-              disabled={isSubmitting}
-              className="text-xs h-8"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  Deleting...
-                </>
-              ) : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 파일 목록 대화상자 */}
-      <Dialog open={showFilesDialog} onOpenChange={setShowFilesDialog}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="text-sm">
-              파일 목록 - {selectedVersionFiles?.versionCode} ({selectedVersionFiles?.versionName})
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {selectedVersionFiles?.files?.totalCount || 0}개 파일
-              {selectedVersionFiles?.files?.totalSize ? ` (총 ${formatFileSize(selectedVersionFiles.files.totalSize)})` : ''}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="border rounded-md">
-            <Table>
-              <TableHeader>
-                <TableRow className="h-8">
-                  <TableHead className="w-[200px] text-[9px] py-1 px-2">파일명</TableHead>
-                  <TableHead className="w-[80px] text-[9px] py-1 px-2">타입</TableHead>
-                  <TableHead className="w-[80px] text-[9px] py-1 px-2">크기</TableHead>
-                  <TableHead className="w-[80px] text-right text-[9px] py-1 px-2">동작</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {selectedVersionFiles?.files?.files && selectedVersionFiles.files.files.length > 0 ? (
-                  selectedVersionFiles.files.files.map((file, index) => (
-                    <TableRow key={file.id || index} className="h-8">
-                      <TableCell className="font-medium text-[9px] py-1 px-2">
-                        <div className="flex items-center">
-                          <File className="h-3 w-3 mr-1 text-blue-500" />
-                          {file.fileName || file.name}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-[9px] py-1 px-2">
-                        {file.fileType ||  "Unknown"}
-                      </TableCell>
-                      <TableCell className="text-[9px] py-1 px-2">
-                        {formatFileSize(file.fileSize || file.size)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5 text-blue-500 hover:text-blue-600 hover:bg-blue-50"
-                          disabled={!file.download_url}
-                          onClick={() => {
-                            if (file.download_url) {
-                              window.open(file.download_url, '_blank')
-                            }
-                          }}
-                        >
-                          <Download className="h-3 w-3" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center h-16 text-[9px] text-gray-500">
-                      파일이 없습니다
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <DialogFooter>
-            <Button
-              size="sm"
-              onClick={() => setShowFilesDialog(false)}
-              className="text-xs"
-            >
-              닫기
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 업로드 진행 대화상자 */}
-      <Dialog open={uploadDialogOpen} onOpenChange={handleCloseUploadDialog}>
-        <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>파일 업로드 중</DialogTitle>
-            <DialogDescription>
-              {isUploading
-                ? "서버에 파일을 업로드하는 중입니다. 이 대화상자를 닫지 마세요."
-                : "모든 파일이 성공적으로 업로드되었습니다."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="mt-4 space-y-4">
-            <div className="space-y-2">
-              <div className="text-sm font-medium flex justify-between">
-                <span>전체 진행률</span>
-                <span>{Math.round(overallProgress)}%</span>
-              </div>
-              <CustomProgress value={overallProgress} className="h-2" />
-
-              {/* 남은 시간 및 속도 정보 추가 */}
-              {isUploading && fileUploads.length > 0 && (
-                <div className="mt-1 flex justify-between text-xs text-gray-500">
-                  <span>
-                    예상 남은 시간: {
-                      formatTime(
-                        Math.max(
-                          ...fileUploads
-                            .filter(f => f.status === 'uploading')
-                            .map(f => f.timeRemaining || 0)
-                        )
-                      )
-                    }
-                  </span>
-                  <span>
-                    평균 속도: {
-                      formatFileSize(
-                        fileUploads
-                          .filter(f => f.status === 'uploading')
-                          .reduce((acc, f) => acc + (f.speed || 0), 0) /
-                          fileUploads.filter(f => f.status === 'uploading').length || 1
-                      )
-                    }/s
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="border rounded-md">
-              <ScrollArea className="h-60">
-                <div className="p-4 space-y-3">
-                  {fileUploads.map((file) => (
-                    <div key={file.id} className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <div className="flex items-center">
-                          {file.status === 'uploading' && <Loader2 className="h-4 w-4 mr-2 animate-spin text-blue-500" />}
-                          {file.status === 'completed' && <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />}
-                          {file.status === 'error' && <AlertCircle className="h-4 w-4 mr-2 text-red-500" />}
-                          <span className="font-medium truncate max-w-[200px]">{file.name}</span>
-                        </div>
-                        <span className="text-gray-500 text-xs">
-                          {formatFileSize(file.size)}
-                          {file.status === 'uploading' && file.speed && file.timeRemaining ? (
-                            <> • {formatFileSize(file.speed)}/s • {formatTime(file.timeRemaining)}</>
-                          ) : null}
-                        </span>
-                      </div>
-
-                      <CustomProgress
-                        value={file.progress}
-                        className={cn(
-                          "h-1",
-                          file.status === 'completed' ? "bg-green-100" : "",
-                          file.status === 'error' ? "bg-red-100" : ""
-                        )}
-                      />
-
-                      {file.status === 'error' && (
-                        <p className="text-xs text-red-500">{file.errorMessage || '업로드 실패'}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </div>
-          </div>
-
-          <DialogFooter className="sm:justify-between">
-            <div className="flex gap-2">
-              {isUploading && (
-                <Button variant="outline" onClick={handleCancelUpload}>
-                  업로드 취소
-                </Button>
-              )}
-            </div>
-            <Button
-              type="button"
-              disabled={isUploading}
-              onClick={handleCloseUploadDialog}
-            >
-              {isUploading ? "업로드 중..." : "닫기"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ViewFilesDialog
+        showDialog={showFilesDialog}
+        setShowDialog={setShowFilesDialog}
+        selectedVersion={selectedVersionFiles}
+        formatFileSize={formatFileSize}
+      />
     </div>
   )
 }
