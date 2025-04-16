@@ -35,7 +35,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
-
+import { formatFileSize } from '@/lib/utils'
 // 상단에 새로 분리한 컴포넌트들을 임포트
 import AddVersionDialog from './AddVersionDialog';
 import EditVersionDialog from './EditVersionDialog';
@@ -47,15 +47,6 @@ interface VersionManagerProps {
   onBack: () => void;
 }
 
-// 간단한 Progress 컴포넌트
-const CustomProgress = ({ value = 0, className = "" }: { value?: number, className?: string }) => (
-  <div className={`relative h-2 w-full overflow-hidden rounded-full bg-gray-100 ${className}`}>
-    <div
-      className="h-full w-full flex-1 bg-blue-500 transition-all"
-      style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
-    />
-  </div>
-);
 
 // 파일 업로드 상태 인터페이스
 interface FileUploadStatus {
@@ -345,31 +336,17 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
               [file.name]: 100
             }));
 
-            uploadedFileData.forEach(async (fileData) => {
-              await apiService.addFileToVersion(buildId, newVersion.id, {
-                name: fileData.name,
-                size: fileData.size,
-                fileSize: fileData.size,
-                download_url: fileData.url,
-                md5_hash: fileData.md5,
-                fileType: fileData.type,
-                fileName: fileData.name,
-                originalName: fileData.name,
-                filePath: fileData.relativePath,
-              });
+            await apiService.addFileToVersion(buildId, newVersion.id, {
+              name: file.name,
+              size: file.size,
+              fileSize: file.size,
+              download_url: url,
+              md5_hash: md5,
+              fileType: file.type,
+              fileName: file.name,
+              originalName: file.name,
+              filePath: relativePath,
             });
-
-            setNewVersion({
-              buildId: buildId,
-              versionCode: '',
-              versionName: '',
-              changeLog: '',
-              status: 'draft'
-            });
-            setUploadedFiles([]);
-            await loadVersions();
-            setShowAddDialog(false);
-
 
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -386,7 +363,19 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
           }
         }
 
+
         setIsUploading(false);
+
+        setNewVersion({
+          buildId: buildId,
+          versionCode: '',
+          versionName: '',
+          changeLog: '',
+          status: 'draft'
+        });
+        setUploadedFiles([]);
+        await loadVersions();
+        setShowAddDialog(false);
       } else {
 
         setNewVersion({
@@ -1044,6 +1033,164 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     }
   }
 
+  // 업로드 다이얼로그 닫기
+  const handleCloseUploadDialog = () => {
+    // 업로드 중이 아니거나 모든 파일이 완료/에러 상태일 때만 닫기
+    const canClose = !isUploading || fileUploads.every(file =>
+      file.status === 'completed' || file.status === 'error'
+    );
+
+    if (canClose) {
+      setUploadDialogOpen(false);
+      setFileUploads([]);
+      setOverallProgress(0);
+    } else {
+      toast({
+        title: "업로드 중",
+        description: "모든 파일 업로드가 완료될 때까지 기다려주세요.",
+      });
+    }
+  };
+
+  // 업로드 취소
+  const handleCancelUpload = () => {
+    setIsUploading(false);
+    setUploadDialogOpen(false);
+    setFileUploads([]);
+    setOverallProgress(0);
+    setUploadProgress({});
+
+    toast({
+      title: "업로드가 취소되었습니다",
+      description: "파일 업로드가 사용자에 의해 취소되었습니다.",
+      variant: "destructive"
+    });
+
+    console.log("파일 업로드가 취소되었습니다.");
+  };
+
+  // 파일 목록 보기 처리
+  const handleViewFiles = (version: Version) => {
+    setSelectedVersionFiles(version);
+    setShowFilesDialog(true);
+  };
+
+  // 파일 업로드 이벤트 리스너 추가
+  useEffect(() => {
+    // 파일 업로드 진행률 리스너 설정
+    const handleUploadProgress = (_: any, data: any) => {
+      console.log('Upload progress:', data);
+
+      if (data.failed) {
+        toast({
+          title: '업로드 실패',
+          description: data.error || '알 수 없는 오류가 발생했습니다',
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // 업로드 진행률 업데이트
+      setUploadProgress(prev => {
+        // 파일 이름 추출 (key에서 파일 이름 부분만 추출)
+        const fileName = data.key.split('/').pop();
+        if (!fileName) return prev;
+
+        return {
+          ...prev,
+          [fileName]: data.percentage
+        };
+      });
+
+      // 파일 업로드 상태 업데이트 (속도 및 남은 시간 계산 포함)
+      setFileUploads(prev => {
+        const now = Date.now();
+        const newUploads = [...prev];
+        const fileIndex = newUploads.findIndex(file =>
+          file.name && data.key && data.key.includes(file.name)
+        );
+
+        if (fileIndex !== -1) {
+          const currentFile = newUploads[fileIndex];
+          const lastUpdate = currentFile.lastUpdate || now;
+          const lastBytes = currentFile.uploadedBytes || 0;
+          const currentBytes = data.loaded || 0;
+
+          // 속도 계산 (bytes/sec)
+          const timeDiff = (now - lastUpdate) / 1000; // 초 단위로 변환
+          let speed = currentFile.speed || 0;
+
+          if (timeDiff > 0) {
+            const byteDiff = currentBytes - lastBytes;
+            const instantSpeed = byteDiff / timeDiff;
+            // 이동 평균으로 속도 계산 (급격한 변화를 완화)
+            speed = currentFile.speed ? (currentFile.speed * 0.7 + instantSpeed * 0.3) : instantSpeed;
+          }
+
+          // 남은 시간 계산 (초)
+          let timeRemaining = 0;
+          if (speed > 0) {
+            const remainingBytes = currentFile.size - currentBytes;
+            timeRemaining = remainingBytes / speed;
+          }
+
+          // 파일 진행률 업데이트
+          newUploads[fileIndex] = {
+            ...currentFile,
+            progress: data.percentage,
+            status: data.completed ? 'completed' : 'uploading',
+            lastUpdate: now,
+            uploadedBytes: currentBytes,
+            speed,
+            timeRemaining
+          };
+
+          // 전체 진행률 업데이트
+          const totalProgress = newUploads.reduce((acc, file) => acc + file.progress, 0) / newUploads.length;
+          setOverallProgress(totalProgress);
+        }
+
+        return newUploads;
+      });
+
+      // 업로드 완료 처리
+      if (data.completed) {
+        console.log('Upload completed for:', data.key);
+      }
+    };
+
+    if (window.api && window.api.on) {
+      // 리스너 등록
+      window.api.on('upload-progress', handleUploadProgress);
+
+      // 클린업
+      return () => {
+        if (window.api && window.api.off) {
+          window.api.off('upload-progress', handleUploadProgress);
+        }
+      };
+    }
+
+    return undefined;
+  }, [toast]);
+
+
+  // 시간 포맷팅 함수
+  const formatTime = (seconds: number): string => {
+    if (!isFinite(seconds) || seconds < 0) return '계산 중...';
+    if (seconds < 60) return `${Math.ceil(seconds)}초`;
+
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.ceil(seconds % 60);
+
+    if (minutes < 60) return `${minutes}분 ${remainingSeconds}초`;
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    return `${hours}시간 ${remainingMinutes}분`;
+  };
+
   // 업로드 파일 제거
   const handleRemoveFile = (index: number) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index))
@@ -1189,169 +1336,6 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       setIsUploading(false)
     }
   }
-
-  // 업로드 다이얼로그 닫기
-  const handleCloseUploadDialog = () => {
-    // 업로드 중이 아니거나 모든 파일이 완료/에러 상태일 때만 닫기
-    const canClose = !isUploading || fileUploads.every(file =>
-      file.status === 'completed' || file.status === 'error'
-    );
-
-    if (canClose) {
-      setUploadDialogOpen(false);
-      setFileUploads([]);
-      setOverallProgress(0);
-    } else {
-      toast({
-        title: "업로드 중",
-        description: "모든 파일 업로드가 완료될 때까지 기다려주세요.",
-      });
-    }
-  };
-
-  // 업로드 취소
-  const handleCancelUpload = () => {
-    setIsUploading(false);
-    setUploadDialogOpen(false);
-    setFileUploads([]);
-    setOverallProgress(0);
-
-    toast({
-      title: "업로드 취소",
-      description: "파일 업로드가 취소되었습니다.",
-    });
-  };
-
-  // 파일 업로드 이벤트 리스너 추가
-  useEffect(() => {
-    // 파일 업로드 진행률 리스너 설정
-    const handleUploadProgress = (_: any, data: any) => {
-      console.log('Upload progress:', data);
-
-      if (data.failed) {
-        toast({
-          title: '업로드 실패',
-          description: data.error || '알 수 없는 오류가 발생했습니다',
-          variant: "destructive"
-        });
-        return;
-      }
-
-      // 업로드 진행률 업데이트
-      setUploadProgress(prev => {
-        // 파일 이름 추출 (key에서 파일 이름 부분만 추출)
-        const fileName = data.key.split('/').pop();
-        if (!fileName) return prev;
-
-        return {
-          ...prev,
-          [fileName]: data.percentage
-        };
-      });
-
-      // 파일 업로드 상태 업데이트 (속도 및 남은 시간 계산 포함)
-      setFileUploads(prev => {
-        const now = Date.now();
-        const newUploads = [...prev];
-        const fileIndex = newUploads.findIndex(file =>
-          file.name && data.key && data.key.includes(file.name)
-        );
-
-        if (fileIndex !== -1) {
-          const currentFile = newUploads[fileIndex];
-          const lastUpdate = currentFile.lastUpdate || now;
-          const lastBytes = currentFile.uploadedBytes || 0;
-          const currentBytes = data.loaded || 0;
-
-          // 속도 계산 (bytes/sec)
-          const timeDiff = (now - lastUpdate) / 1000; // 초 단위로 변환
-          let speed = currentFile.speed || 0;
-
-          if (timeDiff > 0) {
-            const byteDiff = currentBytes - lastBytes;
-            const instantSpeed = byteDiff / timeDiff;
-            // 이동 평균으로 속도 계산 (급격한 변화를 완화)
-            speed = currentFile.speed ? (currentFile.speed * 0.7 + instantSpeed * 0.3) : instantSpeed;
-          }
-
-          // 남은 시간 계산 (초)
-          let timeRemaining = 0;
-          if (speed > 0) {
-            const remainingBytes = currentFile.size - currentBytes;
-            timeRemaining = remainingBytes / speed;
-          }
-
-          // 파일 진행률 업데이트
-          newUploads[fileIndex] = {
-            ...currentFile,
-            progress: data.percentage,
-            status: data.completed ? 'completed' : 'uploading',
-            lastUpdate: now,
-            uploadedBytes: currentBytes,
-            speed,
-            timeRemaining
-          };
-
-          // 전체 진행률 업데이트
-          const totalProgress = newUploads.reduce((acc, file) => acc + file.progress, 0) / newUploads.length;
-          setOverallProgress(totalProgress);
-        }
-
-        return newUploads;
-      });
-
-      // 업로드 완료 처리
-      if (data.completed) {
-        console.log('Upload completed for:', data.key);
-      }
-    };
-
-    if (window.api && window.api.on) {
-      // 리스너 등록
-      window.api.on('upload-progress', handleUploadProgress);
-
-      // 클린업
-      return () => {
-        if (window.api && window.api.off) {
-          window.api.off('upload-progress', handleUploadProgress);
-        }
-      };
-    }
-
-    return undefined;
-  }, [toast]);
-
-  // 파일 크기 포맷팅 함수
-  const formatFileSize = (bytes: number | undefined): string => {
-    if (bytes === undefined || bytes === 0) return '0 B';
-
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-  };
-
-  // 시간 포맷팅 함수
-  const formatTime = (seconds: number): string => {
-    if (!isFinite(seconds) || seconds < 0) return '계산 중...';
-    if (seconds < 60) return `${Math.ceil(seconds)}초`;
-
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.ceil(seconds % 60);
-
-    if (minutes < 60) return `${minutes}분 ${remainingSeconds}초`;
-
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-
-    return `${hours}시간 ${remainingMinutes}분`;
-  };
-
-  // 파일 목록 보기 처리
-  const handleViewFiles = (version: Version) => {
-    setSelectedVersionFiles(version);
-    setShowFilesDialog(true);
-  };
 
   // 로딩 중일 때 표시
   if (loading) {
@@ -1582,6 +1566,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         handleDrop={handleDrop}
         handleRemoveFile={handleRemoveFile}
         handleFileSelect={handleFileSelect}
+        cancelUpload={handleCancelUpload}
       />
 
       <EditVersionDialog
@@ -1605,6 +1590,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         handleFileSelect={handleFileSelect}
         formatFileSize={formatFileSize}
         toast={toast}
+        cancelUpload={handleCancelUpload}
       />
 
       <DeleteVersionDialog

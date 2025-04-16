@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { UploadCloud, FilePlus, File, X, Loader2, Download, Trash } from 'lucide-react';
 import { Version, VersionFile } from '@/lib/api';
+import { useToast } from '@/components/ui/use-toast';
 
 interface EditVersionDialogProps {
   showDialog: boolean;
@@ -43,6 +44,7 @@ interface EditVersionDialogProps {
   handleFileSelect: (e: ChangeEvent<HTMLInputElement>) => void;
   formatFileSize: (bytes: number | undefined) => string;
   toast: any;
+  cancelUpload?: () => void;
 }
 
 export default function EditVersionDialog({
@@ -65,10 +67,37 @@ export default function EditVersionDialog({
   handleRemoveFile,
   handleFileSelect,
   formatFileSize,
-  toast
+  toast,
+  cancelUpload
 }: EditVersionDialogProps) {
+  const handleOpenChange = (open: boolean) => {
+    if (!open && isUploading) {
+      if (cancelUpload) {
+        cancelUpload();
+        toast({
+          title: "업로드 취소됨",
+          description: "파일 업로드가 취소되었습니다.",
+          variant: "destructive"
+        });
+      } else {
+        if (window.confirm("업로드가 진행 중입니다. 정말 취소하시겠습니까?")) {
+          setShowDialog(false);
+          toast({
+            title: "업로드 취소됨",
+            description: "파일 업로드가 취소되었습니다.",
+            variant: "destructive"
+          });
+        } else {
+          return;
+        }
+      }
+    }
+
+    setShowDialog(open);
+  };
+
   return (
-    <Dialog open={showDialog} onOpenChange={setShowDialog}>
+    <Dialog open={showDialog} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle className="text-sm">Edit Version</DialogTitle>
@@ -78,7 +107,6 @@ export default function EditVersionDialog({
         </DialogHeader>
         {selectedVersion && (
           <div className="grid gap-4 py-4">
-            {/* Code, Name, Status 한 줄로 표시 */}
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="edit-version" className="text-xs mb-1 block">
@@ -142,7 +170,6 @@ export default function EditVersionDialog({
               </div>
             </div>
 
-            {/* ChangeLog */}
             <div>
               <Textarea
                 id="edit-changeLog"
@@ -158,7 +185,6 @@ export default function EditVersionDialog({
               )}
             </div>
 
-            {/* 파일 업로드 UI 추가 */}
             <div>
               <Label className="text-xs mb-1 block">Files</Label>
               <div
@@ -186,7 +212,6 @@ export default function EditVersionDialog({
                 </div>
               </div>
 
-              {/* 선택된 파일 목록 */}
               {uploadedFiles.length > 0 && (
                 <div className="mb-4">
                   <div className="text-xs font-medium mb-2">Selected Files ({uploadedFiles.length})</div>
@@ -203,7 +228,6 @@ export default function EditVersionDialog({
                           </div>
                         </div>
 
-                        {/* 업로드 진행률 */}
                         {uploadProgress[file.name] && uploadProgress[file.name] > 0 ? (
                           <div className="w-24 bg-gray-200 rounded-full h-1.5 overflow-hidden">
                             <div
@@ -226,7 +250,6 @@ export default function EditVersionDialog({
                 </div>
               )}
 
-              {/* 기존 파일 목록 - 삭제 기능 포함 */}
               {selectedVersion.files && selectedVersion.files.files && selectedVersion.files.files.length > 0 ? (
                 <div className="mb-4">
                   <div className="text-xs font-medium mb-2">
@@ -262,10 +285,8 @@ export default function EditVersionDialog({
                             onClick={() => {
                               if (!file.id) return;
 
-                              // 삭제할 파일 목록에 추가
                               setFilesToDelete(prev => [...prev, file]);
 
-                              // UI에서만 일단 제거 (저장 전까지 실제 삭제되지 않음)
                               setSelectedVersion({
                                 ...selectedVersion,
                                 files: {
@@ -305,13 +326,21 @@ export default function EditVersionDialog({
           <Button
             variant="outline"
             onClick={() => {
-              setShowDialog(false)
-              setUploadedFiles([])
+              if (isUploading && cancelUpload) {
+                cancelUpload();
+                toast({
+                  title: "업로드 취소됨",
+                  description: "파일 업로드가 취소되었습니다.",
+                  variant: "destructive"
+                });
+              }
+              setShowDialog(false);
+              setUploadedFiles([]);
             }}
-            disabled={isSubmitting}
+            disabled={isSubmitting && !isUploading}
             className="text-xs h-8"
           >
-            Cancel
+            {isUploading ? 'Cancel Upload' : 'Cancel'}
           </Button>
           <Button
             onClick={handleUpdateVersion}

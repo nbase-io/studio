@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { UploadCloud, FilePlus, File, X, Loader2 } from 'lucide-react';
 import { Version } from '@/lib/api';
+import { useToast } from '@/components/ui/use-toast';
 
 interface AddVersionDialogProps {
   showDialog: boolean;
@@ -39,6 +40,7 @@ interface AddVersionDialogProps {
   handleDrop: (e: DragEvent<HTMLDivElement>) => void;
   handleRemoveFile: (index: number) => void;
   handleFileSelect: (e: ChangeEvent<HTMLInputElement>) => void;
+  cancelUpload?: () => void;
 }
 
 export default function AddVersionDialog({
@@ -58,10 +60,12 @@ export default function AddVersionDialog({
   handleDragLeave,
   handleDrop,
   handleRemoveFile,
-  handleFileSelect
+  handleFileSelect,
+  cancelUpload
 }: AddVersionDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isVersionSaved, setIsVersionSaved] = useState<boolean>(false);
+  const { toast } = useToast();
 
   // 저장 후 파일 업로드하고 다이얼로그 닫는 함수
   const handleSaveAndUpload = async () => {
@@ -83,8 +87,40 @@ export default function AddVersionDialog({
     }
   };
 
+  // 다이얼로그 닫기 시 호출되는 함수
+  const handleOpenChange = (open: boolean) => {
+    // 업로드 중이면 업로드 취소 확인
+    if (!open && isUploading) {
+      if (cancelUpload) {
+        // 취소 함수가 제공된 경우 실행
+        cancelUpload();
+        toast({
+          title: "업로드 취소됨",
+          description: "파일 업로드가 취소되었습니다.",
+          variant: "destructive"
+        });
+      } else {
+        // 취소 확인
+        if (window.confirm("업로드가 진행 중입니다. 정말 취소하시겠습니까?")) {
+          setShowDialog(false);
+          toast({
+            title: "업로드 취소됨",
+            description: "파일 업로드가 취소되었습니다.",
+            variant: "destructive"
+          });
+        } else {
+          // 취소하지 않음 - 다이얼로그 유지
+          return;
+        }
+      }
+    }
+
+    // 다이얼로그 상태 변경
+    setShowDialog(open);
+  };
+
   return (
-    <Dialog open={showDialog} onOpenChange={setShowDialog}>
+    <Dialog open={showDialog} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-sm">Add New Version</DialogTitle>
@@ -236,8 +272,22 @@ export default function AddVersionDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setShowDialog(false)} className="text-xs h-8">
-            Cancel
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (isUploading && cancelUpload) {
+                cancelUpload();
+                toast({
+                  title: "업로드 취소됨",
+                  description: "파일 업로드가 취소되었습니다.",
+                  variant: "destructive"
+                });
+              }
+              setShowDialog(false);
+            }}
+            className="text-xs h-8"
+          >
+            {isUploading ? 'Cancel Upload' : 'Cancel'}
           </Button>
 
           {!isVersionSaved ? (
