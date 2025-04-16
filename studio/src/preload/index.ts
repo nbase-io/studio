@@ -24,6 +24,17 @@ const api = {
   // S3 파일 업로드
   uploadFileToS3: (params: any): Promise<any> => ipcRenderer.invoke('upload-file-to-s3', params),
 
+  // 업로드 취소
+  cancelUpload: (): Promise<any> => ipcRenderer.invoke('cancel-upload'),
+
+  // 파일을 버전에 추가 (임시 구현 - 나중에 실제 데이터베이스 연동으로 변경 필요)
+  addFileToVersion: (params: { versionId: string; fileName: string; fileUrl: string; fileSize: number }): Promise<any> => {
+    console.log('파일을 버전에 추가:', params);
+    // 실제 구현에서는 데이터베이스에 파일 정보를 저장해야 함
+    // 현재는 성공 응답만 반환
+    return Promise.resolve({ success: true });
+  },
+
   // S3 파일 삭제
   deleteFileFromS3: (params: any): Promise<any> => ipcRenderer.invoke('delete-file-from-s3', params),
 
@@ -44,7 +55,20 @@ const api = {
 
   // 임시 파일 생성 (파일 업로드용)
   saveTempFile: (params: { buffer: ArrayBuffer; fileName: string }): Promise<any> => {
+    console.log('Invoking save-temp-file with params:', { fileName: params.fileName, bufferSize: params.buffer.byteLength });
     return ipcRenderer.invoke('save-temp-file', params)
+  },
+
+  // 빈 임시 파일 생성 (대용량 파일용)
+  createTempFile: (params: { fileName: string; totalSize: number }): Promise<any> => {
+    console.log('Invoking create-temp-file:', params);
+    return ipcRenderer.invoke('create-temp-file', params)
+  },
+
+  // 임시 파일에 데이터 추가
+  appendToTempFile: (params: { filePath: string; buffer: ArrayBuffer; offset: number }): Promise<any> => {
+    console.log('Invoking append-to-temp-file:', { filePath: params.filePath, bufferSize: params.buffer.byteLength, offset: params.offset });
+    return ipcRenderer.invoke('append-to-temp-file', params)
   },
 
   // 임시 파일 삭제
@@ -77,6 +101,23 @@ const api = {
   // 개발자 도구 열기
   openDevTools: (): void => {
     ipcRenderer.send('open-dev-tools')
+  },
+
+  // 이벤트 리스너 관리
+  on: (channel: string, func: (...args: any[]) => void) => {
+    const validChannels = ['upload-progress', 'upload-cancelled'];
+    if (validChannels.includes(channel)) {
+      return ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
+    }
+    return null;
+  },
+
+  off: (channel: string, func: (...args: any[]) => void) => {
+    const validChannels = ['upload-progress', 'upload-cancelled'];
+    if (validChannels.includes(channel)) {
+      return ipcRenderer.removeListener(channel, (event, ...args) => func(event, ...args));
+    }
+    return null;
   }
 }
 

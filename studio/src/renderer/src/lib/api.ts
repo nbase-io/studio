@@ -21,24 +21,6 @@ export interface Build {
 }
 
 /**
- * Version interface representing a build version
- */
-export interface Version {
-  id?: string;
-  buildId: string;
-  version: string;
-  description?: string;
-  size?: number;
-  download_url?: string;
-  status?: 'draft' | 'published' | 'archived' | 'development';
-  createdAt?: string;
-  updatedAt?: string;
-  build_number?: number;
-  changelog?: string;
-  files?: VersionFile[];
-}
-
-/**
  * Version file interface
  */
 export interface VersionFile {
@@ -47,9 +29,42 @@ export interface VersionFile {
   name: string;
   size?: number;
   download_url: string;
-  file_type?: string;
   md5_hash?: string;
   createdAt?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  mimeType?: string;
+  filePath?: string;
+  originalName?: string;
+}
+
+/**
+ * Version files collection interface - 서버에서 반환하는 형태에 맞게 정의
+ */
+export interface VersionFiles {
+  totalCount: number;
+  totalSize: number;
+  files: VersionFile[];
+}
+
+/**
+ * Version interface representing a build version
+ */
+export interface Version {
+  id?: string;
+  buildId: string;
+  versionCode: string;
+  versionName: string;
+  description?: string;
+  size?: number;
+  download_url?: string;
+  status?: 'draft' | 'published' | 'archived' | 'development';
+  createdAt?: string;
+  updatedAt?: string;
+  build_number?: number;
+  changeLog?: string;
+  files?: VersionFiles;
 }
 
 /**
@@ -586,14 +601,15 @@ export class ApiService {
     try {
       const response = await this.request<{ data: Version }>(`builds/${buildId}/versions/${versionId}`, 'PUT', versionData);
 
-      if (!response || !response.data) {
+      console.log('updateVersion response:', response);
+      if (!response) {
         throw new Error('Failed to update version');
       }
 
       const version = response.data;
 
       // Apply CDN URL to download URLs
-      if (this.cdnUrl && version.download_url && !version.download_url.startsWith('http')) {
+      if (this.cdnUrl && version?.download_url && !version?.download_url.startsWith('http')) {
         version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
       }
 

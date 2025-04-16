@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FolderDown, RefreshCw, Upload, List, Grid, FileX, Download, FileEdit, Clock, Gauge, FolderPlus, ChevronUp, FolderUp } from 'lucide-react';
+import { FolderDown, RefreshCw, Upload, List, Grid, FileX, Download, FileEdit, Clock, Gauge, FolderPlus, ChevronUp, FolderUp, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -18,6 +18,7 @@ interface FileToolbarProps {
   uploading: boolean;
   uploadProgress: number;
   selectedFile: any | null;
+  selectedFiles?: any[];
   viewMode: 'list' | 'grid';
   onViewModeChange: (mode: 'list' | 'grid') => void;
   onNavigateUp: () => void;
@@ -46,6 +47,7 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
   uploading,
   uploadProgress,
   selectedFile,
+  selectedFiles = [],
   viewMode,
   onViewModeChange,
   onNavigateUp,
@@ -63,7 +65,10 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
 
   // 다운로드 핸들러
   const handleDownload = () => {
-    if (!selectedFile || !onDownload) return;
+    // 다중 선택된 파일이 있으면 첫 번째 파일 다운로드 (실제로는 다중 다운로드 구현 필요)
+    const fileToDownload = selectedFiles.length > 0 ? selectedFiles[0] : selectedFile;
+
+    if (!fileToDownload || !onDownload) return;
 
     // 다이얼로그 열기
     setDownloadDialogOpen(true);
@@ -72,10 +77,10 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
     // 초기 다운로드 상태 설정
     setDownloadStatus({
       id: Math.random().toString(36).substring(2, 11),
-      name: selectedFile.key.split('/').pop(),
+      name: fileToDownload.key.split('/').pop(),
       progress: 0,
       status: 'downloading',
-      size: selectedFile.size || 0,
+      size: fileToDownload.size || 0,
       speed: 0,
       timeRemaining: 0
     });
@@ -85,7 +90,7 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
 
     // 실제 구현에서는 이 부분에서 onDownload 콜백 호출
     if (onDownload) {
-      onDownload(selectedFile);
+      onDownload(fileToDownload);
     }
   };
 
@@ -248,37 +253,37 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
             <span className="text-[8px]">New</span>
           </Button>
 
-          {/* Rename 버튼 */}
+          {/* 이름 변경 버튼 */}
           <Button
             variant="outline"
-            size="sm"
-            className="h-8 text-gray-700 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 white:text-gray-300"
-            onClick={() => onRename && selectedFile && onRename(selectedFile)}
-            disabled={!selectedFile || !onRename}
+            size="icon"
+            onClick={onRename}
+            disabled={!selectedFile && selectedFiles.length === 0}
+            title="이름 변경"
           >
-            <FileEdit className="h-3.5 w-3.5 mr-2" />
+            <Pencil className="h-4 w-4" />
           </Button>
 
-          {/* Download 버튼 */}
+          {/* 다운로드 버튼 */}
           <Button
             variant="outline"
-            size="sm"
-            className="h-8 text-gray-700 hover:bg-green-50 hover:text-green-600 hover:border-green-200 white:text-gray-300"
-            onClick={handleDownload}
-            disabled={!selectedFile || !onDownload}
+            size="icon"
+            onClick={onDownload}
+            disabled={!selectedFile && selectedFiles.length === 0}
+            title="다운로드"
           >
-            <Download className="h-3.5 w-3.5 mr-2" />
+            <Download className="h-4 w-4" />
           </Button>
 
-          {/* Delete 버튼 */}
+          {/* 삭제 버튼 */}
           <Button
             variant="outline"
-            size="sm"
-            className="h-8 text-gray-700 hover:bg-red-50 hover:text-red-600 hover:border-red-200 white:text-gray-300"
+            size="icon"
             onClick={onDelete}
-            disabled={!selectedFile}
+            disabled={!selectedFile && selectedFiles.length === 0}
+            title="삭제"
           >
-            <FileX className="h-3.5 w-3.5 mr-2" />
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       </div>

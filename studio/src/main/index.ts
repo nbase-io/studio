@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, session } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import fs from 'fs'
@@ -40,14 +40,14 @@ const ENCRYPTION_KEY_BUFFER = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1600,
+    height: 900,
     show: false,
     autoHideMenuBar: true,
     minWidth: 800,
-    minHeight: 800,
-    maxWidth: 1200,
-    maxHeight: 800,
+    minHeight: 600,
+    // maxWidth: 1600,
+    // maxHeight: 1000,
     title: 'GamePot Studio',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
@@ -286,8 +286,52 @@ ipcMain.handle('select-file', async (event, options) => {
   return filePaths
 })
 
+// 진행 중인 업로드 작업 관리 (취소를 위해)
+const activeUploads = new Map();
+
+// 업로드 취소 핸들러
+ipcMain.handle('cancel-upload', async (event) => {
+  try {
+    const senderID = event.sender.id;
+    console.log(`업로드 취소 요청: sender ID ${senderID}`);
+
+    if (activeUploads.has(senderID)) {
+      const uploads = activeUploads.get(senderID);
+      console.log(`취소할 업로드 수: ${uploads.length}`);
+
+      // 모든 활성 업로드 중단
+      for (const upload of uploads) {
+        if (upload.abort && typeof upload.abort === 'function') {
+          console.log(`업로드 중단 중: ${upload.key}`);
+          await upload.abort();
+        }
+      }
+
+      // 업로드 목록 초기화
+      activeUploads.delete(senderID);
+
+      // 취소 완료 알림
+      event.sender.send('upload-cancelled', { success: true });
+
+      return { success: true };
+    } else {
+      console.log('취소할 활성 업로드가 없음');
+      return { success: true, message: '취소할 업로드가 없습니다' };
+    }
+  } catch (error) {
+    console.error('업로드 취소 중 오류:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+    };
+  }
+});
+
 // S3 파일 업로드 핸들러
-ipcMain.handle('upload-file-to-s3', async (_, params: any) => {
+ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
+  // 진행 중인 업로드 객체 (취소를 위해 사용)
+  let uploadOperation = null;
+
   try {
     // 파라미터 형식 검증
     if (!params || typeof params !== 'object') {
@@ -308,19 +352,8 @@ ipcMain.handle('upload-file-to-s3', async (_, params: any) => {
       throw new Error(`파일이 존재하지 않습니다: ${filePath}`);
     }
 
-    // S3 클라이언트 생성
-    const s3Client = new S3Client({
-      region: region || 'ap-northeast-2',
-      credentials: {
-        accessKeyId: accessKeyId || '',
-        secretAccessKey: secretAccessKey || ''
-      }
-    });
-
-    // 파일 객체 생성
-    const fileStream = createReadStream(filePath);
+    // 파일 정보 가져오기
     const fileStats = fs.statSync(filePath);
-
     console.log(`파일 크기: ${fileStats.size} 바이트`);
 
     // 파일 확장자 및 컨텐츠 타입 결정
@@ -343,19 +376,164 @@ ipcMain.handle('upload-file-to-s3', async (_, params: any) => {
       contentType = mimeTypes[ext];
     }
 
-    // 파일 업로드 명령 생성
-    const uploadParams = {
-      Bucket: bucket,
-      Key: key,
-      Body: fileStream,
-      ContentType: contentType
-    };
+    // S3 클라이언트 생성
+    const s3Client = new S3Client({
+      region: region || 'ap-northeast-2',
+      credentials: {
+        accessKeyId: accessKeyId || '',
+        secretAccessKey: secretAccessKey || ''
+      },
+      // 경로 스타일 URL 사용 (일부 호환성 문제 해결)
+      forcePathStyle: true
+    });
 
-    // S3에 파일 업로드
-    const command = new PutObjectCommand(uploadParams);
-    const response = await s3Client.send(command);
+    // 대용량 파일을 처리하기 위한 체크 (5MB 이상)
+    const NORMAL_UPLOAD_LIMIT = 5 * 1024 * 1024; // 5MB
+
+    let response;
+
+    // 발신자 ID 저장 (취소 관리를 위해)
+    const senderID = event.sender.id;
+
+    // 해당 발신자의 업로드 목록이 없으면 초기화
+    if (!activeUploads.has(senderID)) {
+      activeUploads.set(senderID, []);
+    }
+
+    if (fileStats.size > NORMAL_UPLOAD_LIMIT) {
+      console.log(`대용량 파일 처리 시작 - 멀티파트 업로드 사용 (${fileStats.size} 바이트)`);
+
+      // @aws-sdk/client-s3에서는 멀티파트 업로드를 직접 지원하지 않으므로
+      // @aws-sdk/lib-storage를 사용하여 구현
+      const { Upload } = require('@aws-sdk/lib-storage');
+
+      const multipartUpload = new Upload({
+        client: s3Client,
+        params: {
+          Bucket: bucket,
+          Key: key,
+          Body: fs.createReadStream(filePath),
+          ContentType: contentType
+        },
+        queueSize: 4, // 동시 업로드 쓰레드 수
+        partSize: 10 * 1024 * 1024, // 파트 크기(10MB)
+        leavePartsOnError: false
+      });
+
+      // 업로드 작업을 활성 목록에 추가
+      uploadOperation = {
+        key,
+        abort: async () => {
+          try {
+            console.log(`멀티파트 업로드 중단: ${key}`);
+            await multipartUpload.abort();
+
+            // 중단 알림 전송
+            if (event && event.sender) {
+              event.sender.send('upload-progress', {
+                key,
+                cancelled: true,
+                percentage: 0
+              });
+            }
+
+            return true;
+          } catch (abortError) {
+            console.error('업로드 중단 중 오류:', abortError);
+            return false;
+          }
+        }
+      };
+
+      activeUploads.get(senderID).push(uploadOperation);
+
+      // 진행률 보고
+      multipartUpload.on('httpUploadProgress', (progress) => {
+        const loaded = progress.loaded || 0;
+        const percentage = Math.round((loaded / fileStats.size) * 100);
+        console.log(`업로드 진행률: ${percentage}% (${loaded}/${fileStats.size})`);
+
+        // 렌더러에 진행 상황 전송
+        if (event && event.sender) {
+          event.sender.send('upload-progress', {
+            key,
+            loaded,
+            total: fileStats.size,
+            percentage
+          });
+        }
+      });
+
+      response = await multipartUpload.done();
+      console.log('멀티파트 업로드 완료');
+
+      // 완료 알림
+      if (event && event.sender) {
+        event.sender.send('upload-progress', {
+          key,
+          loaded: fileStats.size,
+          total: fileStats.size,
+          percentage: 100,
+          completed: true
+        });
+      }
+    } else {
+      // 작은 파일은 일반 업로드 사용
+      console.log('일반 업로드 시작');
+      const fileContent = fs.readFileSync(filePath);
+
+      const uploadParams = {
+        Bucket: bucket,
+        Key: key,
+        Body: fileContent,
+        ContentType: contentType
+      };
+
+      // 일반 업로드 취소 방법 추가
+      uploadOperation = {
+        key,
+        abort: async () => {
+          console.log(`일반 업로드 중단: ${key}`);
+          // 일반 업로드는 즉시 취소가 어려움 - 취소 상태만 전송
+          if (event && event.sender) {
+            event.sender.send('upload-progress', {
+              key,
+              cancelled: true,
+              percentage: 0
+            });
+          }
+          return true;
+        }
+      };
+
+      activeUploads.get(senderID).push(uploadOperation);
+
+      const command = new PutObjectCommand(uploadParams);
+      response = await s3Client.send(command);
+      console.log('일반 업로드 완료');
+
+      // 완료 알림
+      if (event && event.sender) {
+        event.sender.send('upload-progress', {
+          key,
+          loaded: fileStats.size,
+          total: fileStats.size,
+          percentage: 100,
+          completed: true
+        });
+      }
+    }
 
     console.log(`파일 업로드 완료: ${bucket}/${key}`);
+
+    // 완료된 업로드를 활성 목록에서 제거
+    if (uploadOperation && senderID) {
+      const uploads = activeUploads.get(senderID) || [];
+      const index = uploads.findIndex(u => u.key === key);
+      if (index !== -1) {
+        uploads.splice(index, 1);
+      }
+    }
 
     // 업로드 성공 응답 반환
     return {
@@ -363,9 +541,31 @@ ipcMain.handle('upload-file-to-s3', async (_, params: any) => {
       location: `https://${bucket}.s3.${region || 'ap-northeast-2'}.amazonaws.com/${key}`,
       response
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error uploading file to S3:', error);
-    return { success: false, error: error.message };
+
+    // 오류 발생한 업로드 제거
+    if (uploadOperation && event?.sender?.id) {
+      const senderID = event.sender.id;
+      const uploads = activeUploads.get(senderID) || [];
+      const index = uploads.findIndex(u => u.key === uploadOperation.key);
+      if (index !== -1) {
+        uploads.splice(index, 1);
+      }
+    }
+
+    // 오류 알림
+    if (event && event.sender) {
+      event.sender.send('upload-progress', {
+        error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다',
+        failed: true
+      });
+    }
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+    };
   }
 });
 
@@ -624,8 +824,8 @@ function setupTempDirectory() {
   }
 }
 
-// 임시 파일 생성 핸들러
-ipcMain.handle('save-temp-file', async (_, { buffer, fileName }) => {
+// 임시 파일 생성 핸들러 (대용량 파일용)
+ipcMain.handle('create-temp-file', async (_, { fileName, totalSize }) => {
   try {
     // 임시 디렉토리가 없으면 생성
     if (!fs.existsSync(appTempDir)) {
@@ -638,15 +838,43 @@ ipcMain.handle('save-temp-file', async (_, { buffer, fileName }) => {
     const tempFileName = `${timestamp}-${randomSuffix}-${fileName}`;
     const tempFilePath = join(appTempDir, tempFileName);
 
-    // Uint8Array 버퍼를 파일에 쓰기
-    const uint8Array = new Uint8Array(buffer);
-    fs.writeFileSync(tempFilePath, uint8Array);
+    // 파일 생성 및 크기 예약
+    fs.writeFileSync(tempFilePath, Buffer.alloc(0));
 
-    console.log(`임시 파일 생성됨: ${tempFilePath}`);
+    // 파일 크기를 지정된 크기로 설정 (희소 파일)
+    const fd = fs.openSync(tempFilePath, 'r+');
+    fs.ftruncateSync(fd, totalSize);
+    fs.closeSync(fd);
+
+    console.log(`임시 파일 생성됨: ${tempFilePath} (${totalSize} bytes)`);
     return tempFilePath;
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('임시 파일 생성 중 오류:', error);
     return null;
+  }
+});
+
+// 임시 파일에 데이터 추가 핸들러
+ipcMain.handle('append-to-temp-file', async (_, { filePath, buffer, offset }) => {
+  try {
+    if (!fs.existsSync(filePath)) {
+      throw new Error('파일이 존재하지 않습니다');
+    }
+
+    // 파일 열기 (쓰기 모드)
+    const fileHandle = fs.openSync(filePath, 'r+');
+
+    try {
+      // 지정된 오프셋에 데이터 쓰기
+      fs.writeSync(fileHandle, new Uint8Array(buffer), 0, buffer.length, offset);
+      return { success: true };
+    } finally {
+      // 파일 핸들 닫기
+      fs.closeSync(fileHandle);
+    }
+  } catch (error: unknown) {
+    console.error('임시 파일에 데이터 추가 중 오류:', error);
+    return { success: false, error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다' };
   }
 });
 
@@ -666,6 +894,53 @@ ipcMain.handle('delete-temp-file', async (_, { filePath }) => {
   }
 });
 
+// 임시 파일 저장 핸들러
+ipcMain.handle('save-temp-file', async (_, params) => {
+  try {
+    console.log('save-temp-file 호출됨:', params);
+
+    // 유효성 검사
+    if (!params || typeof params !== 'object') {
+      throw new Error('유효한 파라미터가 아닙니다');
+    }
+
+    const { buffer, fileName } = params;
+
+    if (!buffer) {
+      throw new Error('파일 데이터가 누락되었습니다');
+    }
+
+    if (!fileName) {
+      throw new Error('파일 이름이 누락되었습니다');
+    }
+
+    // 임시 디렉토리가 없으면 생성
+    if (!fs.existsSync(appTempDir)) {
+      fs.mkdirSync(appTempDir, { recursive: true });
+    }
+
+    // 고유한 파일명 생성 (타임스탬프 + 난수 + 원본 파일명)
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 10);
+    const tempFileName = `${timestamp}-${randomSuffix}-${fileName}`;
+    const tempFilePath = join(appTempDir, tempFileName);
+
+    console.log(`임시 파일 생성 중: ${tempFilePath} (${buffer.byteLength} bytes)`);
+
+    // 파일 저장
+    fs.writeFileSync(tempFilePath, Buffer.from(buffer));
+
+    console.log(`임시 파일 생성 완료: ${tempFilePath}`);
+    return tempFilePath;
+  } catch (error: unknown) {
+    console.error('임시 파일 저장 중 오류:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+    };
+  }
+});
+
 // 앱 종료 시 임시 디렉토리 정리
 function cleanupTempDirectory() {
   try {
@@ -673,7 +948,7 @@ function cleanupTempDirectory() {
       fs.rmSync(appTempDir, { recursive: true, force: true });
       console.log(`임시 디렉토리 삭제됨: ${appTempDir}`);
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('임시 디렉토리 삭제 실패:', error);
   }
 }
