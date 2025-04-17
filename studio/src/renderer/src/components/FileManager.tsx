@@ -31,6 +31,7 @@ declare global {
         accessKeyId: string;
         secretAccessKey: string;
         cdnUrl?: string;
+        endpointUrl?: string;
       } | null>;
       uploadFileToS3: (params: {
         filePath: string;
@@ -69,6 +70,16 @@ interface FileUploadStatus {
   timeRemaining?: number; // 남은 시간(초)
   lastUpdate?: number; // 마지막 업데이트 시간
   uploadedBytes?: number; // 업로드된 바이트 수
+}
+
+// S3Config 인터페이스에 주석 추가
+interface S3Config {
+  bucket: string;      // S3 버킷 이름
+  region: string;      // S3 리전 (예: ap-northeast-2)
+  accessKeyId: string; // AWS 액세스 키 ID
+  secretAccessKey: string; // AWS 시크릿 액세스 키
+  cdnUrl?: string;     // CDN URL (선택 사항)
+  endpointUrl?: string; // 사용자 정의 엔드포인트 URL (선택 사항)
 }
 
 // 간단한 Progress 컴포넌트
@@ -136,41 +147,78 @@ const FileManager: React.FC = () => {
 
   // S3 설정 가져오기 함수
   const getS3Config = async () => {
+    console.log('[S3Config] S3 설정 가져오기 시작');
     try {
-      if (!window.api || typeof window.api.getS3Config !== 'function') {
-        console.error('window.api.getS3Config 함수가 정의되지 않았습니다.');
+      // window.api를 통해 설정 가져오기
+      if (window.api && typeof window.api.getS3Config === 'function') {
+        console.log('[S3Config] window.api.getS3Config 함수 호출');
+        const config = await window.api.getS3Config();
 
-        // localStorage에서 정보 가져오기 (대체 방법)
-        const settings = JSON.parse(localStorage.getItem('settings') || '{}');
+        // 반환된 설정 확인
+        if (config) {
+          console.log('[S3Config] S3 설정 로드 성공:', {
+            bucket: config.bucket,
+            region: config.region,
+            accessKeyId: config.accessKeyId ? '***' : '설정되지 않음', // 보안을 위해 실제 키는 로그에 출력하지 않음
+            secretKeySet: config.secretAccessKey ? true : false,
+            cdnUrl: config.cdnUrl || '설정되지 않음',
+            endpointUrl: config.endpointUrl || '설정되지 않음'
+          });
+          return config;
+        } else {
+          console.warn('[S3Config] S3 설정이 null 또는 undefined 반환됨');
+        }
+      } else {
+        console.error('[S3Config] window.api.getS3Config 함수를 찾을 수 없음');
+      }
+
+      // 로컬 스토리지에서 설정 가져오기 시도
+      console.log('[S3Config] 로컬 스토리지에서 설정 가져오기');
+      const settings = localStorage.getItem('settings');
+      if (settings) {
+        const parsedSettings = JSON.parse(settings);
+        console.log('[S3Config] 로컬 스토리지에서 설정 로드됨:', {
+          bucket: parsedSettings.s3Bucket || '설정되지 않음',
+          region: parsedSettings.region || 'ap-northeast-2',
+          accessKeySet: parsedSettings.accessKey ? true : false,
+          secretKeySet: parsedSettings.secretKey ? true : false,
+          cdnUrl: parsedSettings.cdnUrl || '설정되지 않음',
+          endpointUrl: parsedSettings.endpointUrl || '설정되지 않음'
+        });
+
+        // 로컬 스토리지에서 가져온 설정으로 S3Config 객체 생성
         return {
-          bucket: settings.bucketName || 'my-default-bucket',
-          accessKeyId: settings.accessKey || '',
-          secretAccessKey: settings.secretKey || '',
-          region: settings.region || 'ap-northeast-2',
-          cdnUrl: settings.cdnUrl || ''
+          bucket: parsedSettings.s3Bucket || '',
+          region: parsedSettings.region || 'ap-northeast-2',
+          accessKeyId: parsedSettings.accessKey || '',
+          secretAccessKey: parsedSettings.secretKey || '',
+          cdnUrl: parsedSettings.cdnUrl || '',
+          endpointUrl: parsedSettings.endpointUrl || ''
         };
+      } else {
+        console.warn('[S3Config] 로컬 스토리지에 설정이 없음');
       }
 
-      const config = await window.api.getS3Config();
-      if (!config) {
-        throw new Error('S3 설정을 가져오지 못했습니다');
-      }
-
-      return config;
-    } catch (error) {
-      console.error('S3 설정 가져오기 오류:', error);
-      toast({
-        title: 'S3 설정 오류',
-        description: '설정을 가져오는 중 오류가 발생했습니다. 기본값을 사용합니다.'
-      });
-
-      // 오류 발생 시 기본값 반환
+      // 기본 설정 반환
+      console.warn('[S3Config] 기본 설정 반환');
       return {
-        bucket: 'my-default-bucket',
+        bucket: '',
+        region: 'ap-northeast-2',
         accessKeyId: '',
         secretAccessKey: '',
+        cdnUrl: '',
+        endpointUrl: ''
+      };
+    } catch (error) {
+      console.error('[S3Config] S3 설정 가져오기 오류:', error);
+      // 오류 발생 시 기본 설정 반환
+      return {
+        bucket: '',
         region: 'ap-northeast-2',
-        cdnUrl: ''
+        accessKeyId: '',
+        secretAccessKey: '',
+        cdnUrl: '',
+        endpointUrl: ''
       };
     }
   };
@@ -178,251 +226,226 @@ const FileManager: React.FC = () => {
   // 초기 데이터 로드
   useEffect(() => {
     const loadS3Objects = async () => {
+      console.log('[S3] 루트 폴더 객체 로드 시작');
       try {
         setLoading(true);
-        setError(null);
 
-        // S3 설정 가져오기
+        // S3 설정 로드
         const s3Config = await getS3Config();
+        console.log('[S3] 설정 로드 완료, 버킷:', s3Config.bucket);
 
-        if (!s3Config.bucket || !s3Config.accessKeyId || !s3Config.secretAccessKey) {
-          console.warn('S3 configuration is incomplete. Please enter S3 information in the settings menu.');
-          // 빈 폴더 구조 생성
-          const rootNode: S3Object = {
-            key: '/',
-            type: 'folder',
-            children: []
-          };
-
-          setS3Objects([rootNode]);
-          setExpandedFolders(['/']);
+        // 버킷 이름이 설정되지 않은 경우 처리
+        if (!s3Config.bucket) {
+          console.error('[S3] 버킷 이름이 설정되지 않음');
+          showErrorDialog(
+            'S3 설정 오류',
+            'S3 버킷이 설정되지 않았습니다. 설정 메뉴에서 S3 설정을 구성하세요.'
+          );
           setLoading(false);
           return;
         }
 
+        // 액세스 키가 설정되지 않은 경우 처리
+        if (!s3Config.accessKeyId || !s3Config.secretAccessKey) {
+          console.error('[S3] AWS 액세스 키가 설정되지 않음');
+          showErrorDialog(
+            'S3 설정 오류',
+            'AWS 액세스 키가 설정되지 않았습니다. 설정 메뉴에서 S3 설정을 구성하세요.'
+          );
+          setLoading(false);
+          return;
+        }
+
+        console.log('[S3] 실제 S3 서버에서 데이터 가져오기 시작');
         // 실제 S3 서버에서 데이터 가져오기
         if (window.api && typeof window.api.listS3Files === 'function') {
           try {
+            console.log('[S3] API 호출: listS3Files, 버킷:', s3Config.bucket, '프리픽스: ""(루트)');
             const result = await window.api.listS3Files({
               bucket: s3Config.bucket,
               prefix: '' // 루트 디렉토리
             });
 
-            // S3 구조로 데이터 변환
-            const rootFolders: S3Object[] = result.folders.map(folder => {
-              // 폴더 이름만 추출 (경로의 마지막 부분)
-              const folderName = folder.split('/').filter(part => part.trim() !== '').pop() || folder;
+            // API 응답 확인
+            if (result.error) {
+              console.error('[S3] API 오류 발생:', result.error);
+              showErrorDialog('S3 연결 오류', `S3 서버에 연결하는 중 오류가 발생했습니다: ${result.error}`);
+              setLoading(false);
+              return;
+            }
 
-              return {
-                key: folder,
-                displayName: folderName,
-                type: 'folder',
-                children: [] // 나중에 하위 항목을 로드할 때 채워짐
-              };
+            console.log('[S3] 파일 목록 로드 성공:', {
+              파일수: result.files?.length || 0,
+              폴더수: result.folders?.length || 0
             });
 
-            // 루트 노드 생성
-            const rootNode: S3Object = {
-              key: '/',
-              displayName: '/',
-              type: 'folder',
-              children: rootFolders
-            };
+            // 결과 파싱
+            const rootFolder = '/'
+            const parsedFiles: S3Object[] = (result.files || []).map(file => ({
+              key: file.key,
+              size: file.size,
+              lastModified: file.lastModified,
+              folder: rootFolder,
+              selected: false
+            }));
 
-            setS3Objects([rootNode]);
-            setExpandedFolders(['/']); // 루트 노드는 항상 펼침
-            setFolders(result.folders);
+            // 폴더 경로 정규화 (중복 슬래시 제거)
+            const parsedFolders = (result.folders || []).map(folder => {
+              // 중복 슬래시 제거
+              return folder.replace(/\/+/g, '/');
+            });
 
-            // // 루트 폴더의 파일 목록
-            // const rootFiles: S3Object[] = result.files.map(file => ({
-            //   key: file.key,
-            //   size: file.size,
-            //   lastModified: file.lastModified,
-            //   type: 'file'
-            // }));
+            console.log('[S3] 파싱된 폴더 목록:', parsedFolders);
 
-            // setFiles(rootFiles);
-
-            // // 초기 폴더 설정
-            // if (rootFolders.length > 0) {
-            //   const firstFolder = rootFolders[0].key;
-            //   setSelectedFolder(firstFolder);
-            //   setCurrentPath(firstFolder);
-            //   // 첫 번째 폴더 내용 로드
-            //   loadFolderContents(firstFolder);
-            // }
-          } catch (apiError: any) {
-            console.error('S3 API 호출 오류:', apiError);
-
-            const rootNode: S3Object = {
-              key: '/',
-              type: 'folder',
-              children: []
-            };
-
-            setS3Objects([rootNode]);
-            setExpandedFolders(['/']);
+            // 파일 데이터 상태 업데이트
+            console.log('[S3] 파일 데이터 상태 업데이트 시작');
+            setS3Objects(parsedFiles);
+            setFolders(parsedFolders);
+            setCurrentPath('/');
+            console.log('[S3] 초기 데이터 로드 완료, 현재 경로: /');
+          } catch (error) {
+            console.error('[S3] 데이터 가져오기 중 예외 발생:', error);
+            showErrorDialog('S3 연결 오류', `오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
           }
         } else {
-          // API가 사용 불가능할 경우 빈 구조 생성
-          console.warn('listS3Files API not available');
-
-          const rootNode: S3Object = {
-            key: '/',
-            type: 'folder',
-            children: []
-          };
-
-          setS3Objects([rootNode]);
-          setExpandedFolders(['/']);
+          console.error('[S3] window.api.listS3Files 함수를 찾을 수 없음');
+          showErrorDialog('API 오류', 'S3 파일 목록을 가져오는 API를 사용할 수 없습니다.');
         }
-      } catch (err) {
-        const errorMessage = 'Failed to load file list: ' + (err instanceof Error ? err.message : String(err));
-        setError(errorMessage);
-        console.error('Error loading S3 objects:', err);
-        showErrorDialog('Failed to load files', errorMessage);
-
-        // 에러 발생 시에도 기본 UI는 표시
-        const rootNode: S3Object = {
-          key: '/',
-          type: 'folder',
-          children: []
-        };
-
-        setS3Objects([rootNode]);
-        setExpandedFolders(['/']);
+      } catch (error) {
+        console.error('[S3] 전체 로드 과정에서 오류 발생:', error);
+        showErrorDialog('오류', `S3 객체를 로드하는 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
       } finally {
         setLoading(false);
       }
     };
 
     // 초기 로드 실행
-      loadS3Objects();
+    loadS3Objects();
   }, []);
 
   // 특정 폴더의 내용을 로드하는 함수
   const loadFolderContents = async (folderKey: string) => {
-    console.log('[DEBUG] loadFolderContents - Loading folder:', folderKey);
-    setLoading(true);
+    console.log('[S3] 폴더 내용 로드 시작:', folderKey);
     try {
+      setLoading(true);
+
+      // S3 설정 가져오기
       const s3Config = await getS3Config();
+      console.log('[S3] 설정 로드 완료, 버킷:', s3Config.bucket);
 
       if (window.api && typeof window.api.listS3Files === 'function') {
         // S3 서버에서 폴더 내용 가져오기
         // 'root' 키는 실제 S3 경로가 아니므로 빈 문자열로 대체
         const prefix = folderKey === '/' ? '' : folderKey;
-        console.log('[DEBUG] S3 API Request prefix:', prefix);
 
-        const result = await window.api.listS3Files({
-          bucket: s3Config.bucket,
-          prefix
-        });
+        // 중복 슬래시 제거하고 디버깅을 위해 로그 출력
+        const normalizedPrefix = prefix.replace(/\/+/g, '/');
+        console.log('[S3] API 요청 프리픽스(정규화 전):', prefix);
+        console.log('[S3] API 요청 프리픽스(정규화 후):', normalizedPrefix);
 
-        console.log('[DEBUG] S3 API Result:', JSON.stringify({
-          files: result.files.length,
-          folders: result.folders.length,
-          prefix: folderKey
-        }));
+        try {
+          console.log('[S3] API 호출: listS3Files, 버킷:', s3Config.bucket, '프리픽스:', normalizedPrefix);
+          const result = await window.api.listS3Files({
+            bucket: s3Config.bucket,
+            prefix: normalizedPrefix
+          });
 
-        // 파일 목록 변환
-        const folderFiles: S3Object[] = result.files.map(file => ({
-          key: file.key,
-          size: file.size,
-          lastModified: file.lastModified,
-          type: 'file'
-        }));
+          // API 응답 확인
+          if (result.error) {
+            console.error('[S3] API 오류 발생:', result.error);
+            showErrorDialog('S3 연결 오류', `S3 서버에 연결하는 중 오류가 발생했습니다: ${result.error}`);
+            setLoading(false);
+            return;
+          }
 
-        // 하위 폴더 목록 변환
-        const subFolders: S3Object[] = result.folders.map(folder => ({
-          key: folder,
-          type: 'folder',
-          children: [] // 나중에 필요할 때 로드
-        }));
+          console.log('[S3] 폴더 내용 로드 성공:', {
+            폴더: folderKey,
+            파일수: result.files?.length || 0,
+            폴더수: result.folders?.length || 0
+          });
 
-        console.log('[DEBUG] Processed folder contents:', {
-          folderFiles: folderFiles.length,
-          subFolders: subFolders.length
-        });
+          // 파일 목록 처리
+          const newFiles = (result.files || [])
+            .filter(file => {
+              // 폴더 자체는 제외 (일부 S3 구현에서는 폴더도 객체로 반환)
+              // 키가 prefix와 같은 경우 제외 (자기 자신)
+              return file.key !== normalizedPrefix && !file.key.endsWith('/');
+            })
+            .map(file => ({
+              key: file.key,
+              size: file.size,
+              lastModified: file.lastModified,
+              folder: folderKey,
+              selected: false
+            }));
 
-        // 폴더 내용 업데이트
-        const updatedObjects = [...s3Objects];
+          console.log('[S3] 파싱된 파일 목록:', newFiles.map(f => ({ key: f.key, size: f.size })));
 
-        // 해당 폴더 찾기
-        const updateFolderChildren = (objects: S3Object[], key: string): boolean => {
-          console.log('[DEBUG] updateFolderChildren - Searching for key:', key, 'in objects:', objects.map(o => o.key));
+          // 폴더 목록 처리
+          // 폴더 경로 정규화 (중복 슬래시 제거)
+          const newFolders = (result.folders || []).map(folder => {
+            // 중복 슬래시 제거
+            return folder.replace(/\/+/g, '/');
+          });
 
-          for (let i = 0; i < objects.length; i++) {
-            if (objects[i].key === key) {
-              console.log('[DEBUG] Found folder to update:', key);
-              // 중요: children을 빈 배열이라도 항상 설정하여 구조 유지
-              objects[i].children = [...subFolders, ...folderFiles];
-              return true;
-            }
-            if (objects[i].children) {
-              const objChildren = objects[i].children;
-              if (objChildren && objChildren.length > 0) {
-                if (updateFolderChildren(objChildren, key)) {
-                  return true;
-                }
+          console.log('[S3] 파싱된 폴더 목록:', newFolders);
+
+          // 상태 업데이트를 위한 새 객체 생성
+          setS3Objects(prev => {
+            console.log('[S3] 파일 데이터 상태 업데이트 시작');
+
+            // 폴더 내 파일 목록 업데이트
+            const newObjects = [
+              ...prev.filter(obj => obj.folder !== folderKey), // 현재 폴더 외의 파일들 유지
+              ...newFiles // 새로 로드한 파일들 추가
+            ];
+
+            // 폴더 구조 업데이트
+            const newFolders = {
+              ...prev.folders,
+              [folderKey]: {
+                expanded: true,
+                children: result.folders.map(folder => {
+                  // 폴더 이름 추출 (마지막 / 앞까지의 문자열)
+                  const folderName = folder.endsWith('/')
+                    ? folder.substring(0, folder.length - 1)
+                    : folder;
+
+                  // 폴더가 정규화되었는지 확인
+                  if (folder !== folderName + '/') {
+                    console.warn('[S3] 폴더 경로 정규화 이슈:', { 원본: folder, 정규화후: folderName + '/' });
+                  }
+                  return folderName;
+                })
               }
-            }
-          }
-          console.log('[DEBUG] Could not find folder:', key);
-          return false;
-        };
-
-        const updateResult = updateFolderChildren(updatedObjects, folderKey);
-        console.log('[DEBUG] Update result:', updateResult);
-
-        // 업데이트 성공했을 때만 상태 업데이트
-        if (updateResult) {
-          setS3Objects(updatedObjects);
-          console.log('[DEBUG] Updated s3Objects:', updatedObjects);
-        } else {
-          console.warn('[DEBUG] Could not update folder structure for:', folderKey);
-          // 폴더 구조 업데이트 실패 시 객체를 찾을 수 없는 경우 처리
-          // 구조 강제 유지 로직 추가
-          if (s3Objects.length === 0) {
-            const rootNode: S3Object = {
-              key: '/',
-              type: 'folder',
-              children: []
             };
-            setS3Objects([rootNode]);
-            setExpandedFolders(prev => {
-              if (!prev.includes('root')) return [...prev, '/'];
-              return prev;
+
+            console.log('[S3] 업데이트된 폴더 구조:', {
+              폴더수: Object.keys(newFolders).length,
+              현재폴더: folderKey,
+              하위폴더수: newFolders[folderKey]?.children.length || 0
             });
-          }
+
+            return {
+              objects: newObjects,
+              folders: newFolders
+            };
+          });
+
+          // 현재 경로 설정
+          setCurrentPath(folderKey);
+          console.log('[S3] 폴더 내용 로드 완료, 현재 경로:', folderKey);
+        } catch (error) {
+          console.error('[S3] 폴더 내용 가져오기 중 예외 발생:', error);
+          showErrorDialog('S3 연결 오류', `오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
         }
-
-        // 파일 리스트 업데이트 - 항상 수행
-        setFileList([...subFolders, ...folderFiles]);
-
-        // 현재 폴더의 파일과 하위 폴더 설정
-        setFiles(folderFiles);
-        setFolders(result.folders);
-
       } else {
-        // API가 없는 경우 모의 데이터 사용
-        console.warn('listS3Files API is not available');
+        console.error('[S3] window.api.listS3Files 함수를 찾을 수 없음');
+        showErrorDialog('API 오류', 'S3 파일 목록을 가져오는 API를 사용할 수 없습니다.');
       }
     } catch (error) {
-      const errorMessage = 'Failed to load folder contents: ' + (error instanceof Error ? error.message : String(error));
-      console.error('[DEBUG] Error loading folder contents:', error);
-      setError(errorMessage);
-      showErrorDialog('Failed to load folder contents', errorMessage);
-
-      // 에러 발생 시에도 폴더 트리는 유지
-      if (s3Objects.length === 0) {
-        const rootNode: S3Object = {
-          key: '/',
-          type: 'folder',
-          children: []
-        };
-        setS3Objects([rootNode]);
-        setExpandedFolders(['/']);
-      }
+      console.error('[S3] 전체 폴더 로드 과정에서 오류 발생:', error);
+      showErrorDialog('오류', `폴더 내용을 로드하는 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
     } finally {
       setLoading(false);
     }
@@ -564,166 +587,138 @@ const FileManager: React.FC = () => {
 
   // Upload file to S3
   const uploadFileToS3 = async (file: File, index: number, uploadStatuses: FileUploadStatus[]) => {
-    // Update status to uploading
-    setFileUploads(prev => {
-      const newUploads = [...prev];
-      newUploads[index] = { ...newUploads[index], status: 'uploading' };
-      return newUploads;
-    });
-
-    let tempFilePath = '';
+    console.log('[Upload] 파일 업로드 시작:', { 파일명: file.name, 크기: file.size, 인덱스: index });
 
     try {
-      // Prepare file path based on current directory (슬래시 중복 방지)
-      const s3FilePath = currentPath
-        ? `${currentPath.replace(/\/$/, '')}/${file.name}`
-        : file.name;
-
-      // Get S3 client config from window API
-      const s3Config = await getS3Config();
-
-      // Track upload progress
-      const updateProgress = (progress: number) => {
-        setFileUploads(prev => {
-          const newUploads = [...prev];
-          newUploads[index] = { ...newUploads[index], progress };
-
-          // Calculate overall progress
-          const totalProgress = newUploads.reduce((sum, file) => sum + file.progress, 0) / newUploads.length;
-          setOverallProgress(totalProgress);
-
-          return newUploads;
-        });
-      };
-
-      // 개발/테스트 환경에서 시뮬레이션 업로드 사용
-      if (process.env.NODE_ENV === 'development' && typeof window.api.uploadFileToS3 !== 'function') {
-        console.log('시뮬레이션 업로드 진행...');
-        let progress = 0;
-        const interval = setInterval(() => {
-          progress += Math.random() * 10;
-          if (progress > 100) progress = 100;
-
-          updateProgress(progress);
-
-          if (progress === 100) {
-            clearInterval(interval);
-
-            // Set status to completed
-            setFileUploads(prev => {
-              const newUploads = [...prev];
-              newUploads[index] = { ...newUploads[index], status: 'completed' };
-              return newUploads;
-            });
-
-            // If all files completed, refresh the file list
-            const allCompleted = uploadStatuses.every((upload, i) =>
-              i > index || uploadStatuses[i].status === 'completed'
-            );
-
-            if (allCompleted) {
-              setTimeout(() => {
-                loadFiles();
-                setIsUploading(false);
-              }, 1000);
-            }
-          }
-        }, 300);
-
+      // 이미 완료된 파일은 건너뛰기
+      if (uploadStatuses[index].status === 'completed') {
+        console.log('[Upload] 이미 완료된 파일 건너뛰기:', file.name);
         return;
       }
 
-      try {
-        console.log(`파일 ${file.name} 업로드 시작...`);
+      // S3 설정 가져오기
+      const s3Config = await getS3Config();
+      console.log('[Upload] S3 설정 로드 완료:', {
+        버킷: s3Config.bucket,
+        리전: s3Config.region
+      });
 
-        // 1. 파일을 임시 파일로 저장
-        tempFilePath = await saveFileToTemp(file);
-        console.log(`임시 파일 생성 완료: ${tempFilePath}`);
+      // 매개변수 유효성 검사
+      if (!s3Config.bucket || !s3Config.accessKeyId || !s3Config.secretAccessKey) {
+        console.error('[Upload] 필수 S3 설정 누락');
+        throw new Error('S3 버킷 또는 액세스 키가 설정되지 않았습니다.');
+      }
 
-        // 업로드 진행 표시 (25%)
-        updateProgress(25);
-
-        // 2. S3 업로드 실행
-        console.log(`S3 업로드 시작: ${s3FilePath}`);
-        const uploadResult = await window.api.uploadFileToS3({
-          filePath: tempFilePath,
-          bucket: s3Config.bucket,
-          key: s3FilePath,
-          accessKeyId: s3Config.accessKeyId,
-          secretAccessKey: s3Config.secretAccessKey,
-          region: s3Config.region
-        });
-
-        // 업로드 진행 표시 (100%)
-        updateProgress(100);
-
-        // 3. 업로드 결과 처리
-        if (uploadResult && uploadResult.success) {
-          console.log(`파일 업로드 성공: ${uploadResult.location}`);
-
-          // 성공 상태로 업데이트
-          setFileUploads(prev => {
-            const newUploads = [...prev];
+      // 진행 상태 업데이트 함수
+      const updateProgress = (progress: number) => {
+        console.log(`[Upload] 진행률 업데이트: ${file.name} - ${progress}%`);
+        setFileUploads(prev => {
+          const newUploads = [...prev];
+          if (newUploads[index]) {
             newUploads[index] = {
               ...newUploads[index],
-              status: 'completed',
-              progress: 100
+              progress: progress,
+              status: progress >= 100 ? 'completed' : 'uploading'
             };
-            return newUploads;
-          });
-
-          // 임시 파일 정리
-          if (window.api.deleteTempFile && tempFilePath) {
-            try {
-              await window.api.deleteTempFile({ filePath: tempFilePath });
-              console.log('Temporary file cleanup complete');
-            } catch (tempError) {
-              console.warn('Failed to clean up temporary file:', tempError);
-            }
           }
-        } else {
-          throw new Error(uploadResult && uploadResult.error ? uploadResult.error : 'Upload failed');
-        }
-      } catch (uploadError: any) {
-        console.error('File upload error:', uploadError);
-        throw uploadError;
+          return newUploads;
+        });
+
+        // 전체 진행률 계산 및 업데이트
+        setFileUploads(prev => {
+          const overallProgress = prev.reduce((sum, file) => sum + file.progress, 0) / prev.length;
+          setOverallProgress(overallProgress);
+          return prev;
+        });
+      };
+
+      // 임시 파일로 저장
+      console.log('[Upload] 임시 파일로 저장 시작:', file.name);
+      const tempFilePath = await saveFileToTemp(file);
+      console.log('[Upload] 임시 파일 생성 완료:', tempFilePath);
+
+      if (!tempFilePath) {
+        console.error('[Upload] 임시 파일 생성 실패:', file.name);
+        throw new Error('임시 파일 생성에 실패했습니다.');
       }
 
-      // If this is the last file, refresh the file list
-      if (index === uploadStatuses.length - 1) {
-        setTimeout(() => {
-          loadFiles();
-          setIsUploading(false);
-        }, 1000);
-      }
-    } catch (error: any) {
-      console.error('File upload error:', error);
+      // 업로드 경로 설정
+      const s3Key = currentPath === '/'
+        ? file.name
+        : `${currentPath.replace(/^\//, '').replace(/\/$/, '')}/${file.name}`;
 
-      // 임시 파일 정리 시도
-      if (window.api.deleteTempFile && tempFilePath) {
-        try {
-          await window.api.deleteTempFile({ filePath: tempFilePath });
-        } catch (cleanupError) {
-          console.warn('Failed to clean up temporary file:', cleanupError);
-        }
-      }
+      console.log('[Upload] S3 업로드 키:', s3Key);
 
-      // Set status to error
+      // 진행 상태 업데이트
+      updateProgress(25); // 임시 파일 생성 완료 = 25%
+
+      // S3에 업로드
+      console.log('[Upload] S3 업로드 시작');
+      const uploadResult = await window.api.uploadFileToS3({
+        filePath: tempFilePath,
+        bucket: s3Config.bucket,
+        key: s3Key,
+        accessKeyId: s3Config.accessKeyId,
+        secretAccessKey: s3Config.secretAccessKey,
+        region: s3Config.region || 'ap-northeast-2'
+      });
+
+      // 3. 업로드 결과 처리
+      if (uploadResult && uploadResult.success) {
+        console.log(`[Upload] 파일 업로드 성공:`, {
+          파일명: file.name,
+          S3위치: uploadResult.location,
+          키: s3Key
+        });
+
+        // 성공 상태로 업데이트
+        setFileUploads(prev => {
+          const newUploads = [...prev];
+          newUploads[index] = {
+            ...newUploads[index],
+            progress: 100,
+            status: 'completed'
+          };
+          return newUploads;
+        });
+
+        // 현재 폴더 새로고침
+        console.log('[Upload] 현재 폴더 새로고침:', currentPath);
+        await loadFolderContents(currentPath);
+
+        // 토스트 알림
+        toast({
+          title: '업로드 완료',
+          description: `${file.name} 파일이 업로드되었습니다.`
+        });
+
+        return uploadResult.location;
+      } else {
+        console.error('[Upload] 파일 업로드 실패:', uploadResult?.error || '알 수 없는 오류');
+        throw new Error(uploadResult?.error || '파일 업로드에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('[Upload] 업로드 중 오류 발생:', error);
+
+      // 오류 상태로 업데이트
       setFileUploads(prev => {
         const newUploads = [...prev];
         newUploads[index] = {
           ...newUploads[index],
           status: 'error',
-          errorMessage: error instanceof Error ? error.message : '알 수 없는 오류'
+          errorMessage: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.'
         };
         return newUploads;
       });
 
+      // 토스트 알림
       toast({
-        title: "Upload failed",
-        description: `Failed to upload ${file.name}: ${error.message || '알 수 없는 오류'}`,
-        variant: "destructive",
+        title: '업로드 실패',
+        description: `${file.name}: ${error instanceof Error ? error.message : '알 수 없는 오류'}`,
+        variant: 'destructive'
       });
+
+      throw error;
     }
   };
 
@@ -958,7 +953,7 @@ const FileManager: React.FC = () => {
           toast({
             title: successCount === 1 ? "파일 삭제 완료" : `${successCount}개 파일 삭제 완료`,
             description: successCount === 1
-              ? `${filesToDelete[0].key.split('/').pop()} 파일이 삭제되었습니다.`
+              ? `${filesToDelete[0]?.key.split('/').pop()} 파일이 삭제되었습니다.`
               : `${successCount}개의 파일이 삭제되었습니다.`,
           });
 
@@ -1198,7 +1193,19 @@ const FileManager: React.FC = () => {
   useEffect(() => {
     // 파일 업로드 진행률 리스너 설정
     const handleUploadProgress = (_: any, data: any) => {
+      // 업로드 진행 이벤트를 처리하는 함수
+      console.log('[UploadProgress] 업로드 진행 상태 업데이트:', {
+        key: data.key,
+        percentage: data.percentage,
+        loaded: data.loaded,
+        total: data.total,
+        completed: data.completed,
+        failed: data.failed
+      });
+
+      // 업로드 실패 처리
       if (data.failed) {
+        console.error('[UploadProgress] 업로드 실패:', data.error);
         toast({
           title: '업로드 실패',
           description: data.error || '알 수 없는 오류가 발생했습니다',
@@ -1207,109 +1214,94 @@ const FileManager: React.FC = () => {
         return;
       }
 
-      // 취소됨 확인
-      if (data.cancelled) {
-        console.log('업로드 취소 알림 수신:', data);
-        setFileUploads(prev => {
-          const newUploads = [...prev];
-          const fileIndex = newUploads.findIndex(file =>
-            file.name && data.key && data.key.includes(file.name)
-          );
-
-          if (fileIndex !== -1) {
-            newUploads[fileIndex] = {
-              ...newUploads[fileIndex],
-              status: 'error',
-              progress: 0,
-              errorMessage: '사용자에 의해 취소됨'
-            };
-          }
-
-          return newUploads;
-        });
-        return;
-      }
-
-      // 현재 업로드 중인 파일 찾기
+      // 진행 중인 업로드 찾기
       setFileUploads(prev => {
-        const now = Date.now();
+        // 새 배열 생성 (상태 불변성 유지)
         const newUploads = [...prev];
+
+        // 키에서 파일 이름 부분 추출
+        const fileName = data.key?.split('/').pop();
+        if (!fileName) {
+          console.warn('[UploadProgress] 파일 이름을 추출할 수 없음:', data.key);
+          return prev;
+        }
+
+        // 해당 파일 찾기
         const fileIndex = newUploads.findIndex(file =>
           file.name && data.key && data.key.includes(file.name)
         );
 
-        if (fileIndex !== -1) {
-          const currentFile = newUploads[fileIndex];
-          const lastUpdate = currentFile.lastUpdate || now;
-          const lastBytes = currentFile.uploadedBytes || 0;
-          const currentBytes = data.loaded || 0;
+        if (fileIndex === -1) {
+          console.warn('[UploadProgress] 일치하는 파일을 찾을 수 없음:', fileName);
+          return prev;
+        }
 
+        // 현재 파일 정보
+        const currentFile = newUploads[fileIndex];
+        const now = Date.now();
+
+        // 마지막 업데이트 시간과 업로드된 바이트 수
+        const lastUpdate = currentFile.lastUpdate || now;
+        const lastBytes = currentFile.uploadedBytes || 0;
+        const currentBytes = data.loaded || 0;
+
+        // 시간 간격이 충분히 있을 때만 속도 계산 (UI 업데이트 최적화)
+        if (now - lastUpdate > 500) {
           // 속도 계산 (bytes/sec)
           const timeDiff = (now - lastUpdate) / 1000; // 초 단위로 변환
           let speed = currentFile.speed || 0;
 
-          // 최소 0.5초 이상 간격이 있을 때만 속도 계산 (너무 빈번한 업데이트 방지)
-          if (timeDiff > 0.5) {
+          if (timeDiff > 0) {
+            // 바이트 차이 계산
             const byteDiff = currentBytes - lastBytes;
+            // 현재 순간 속도
+            const instantSpeed = byteDiff / timeDiff;
+            // 이동 평균으로 속도 계산 (급격한 변화를 완화)
+            speed = currentFile.speed ? (currentFile.speed * 0.7 + instantSpeed * 0.3) : instantSpeed;
 
-            // 실제로 데이터가 전송되었을 때만 속도 계산
-            if (byteDiff > 0) {
-              const instantSpeed = byteDiff / timeDiff;
-
-              // 급격한 변화 방지를 위한 이동 평균 적용 (이전 속도에 더 높은 가중치)
-              // 더 안정적인 표시를 위해 가중치 조정 (0.7 -> 0.9)
-              if (speed > 0) {
-                speed = speed * 0.9 + instantSpeed * 0.1;
-              } else {
-                speed = instantSpeed;
-              }
-            }
-            // 데이터가 전송되지 않았다면 기존 속도 유지하되 약간 감소
-            else if (speed > 0) {
-              speed = speed * 0.95; // 약간의 감소 적용
-            }
-
-            // 남은 시간 계산 (초)
-            let timeRemaining = currentFile.timeRemaining || 0;
-            if (speed > 0) {
-              const remainingBytes = currentFile.size - currentBytes;
-              const newTimeRemaining = remainingBytes / speed;
-
-              // 남은 시간도 이동 평균으로 안정화
-              if (timeRemaining > 0) {
-                timeRemaining = timeRemaining * 0.8 + newTimeRemaining * 0.2;
-              } else {
-                timeRemaining = newTimeRemaining;
-              }
-
-              // 값이 너무 크거나 작으면 제한
-              if (timeRemaining > 86400) timeRemaining = 86400; // 최대 24시간
-              if (timeRemaining < 0) timeRemaining = 0;
-            }
-
-            // 파일 진행률 업데이트
-            newUploads[fileIndex] = {
-              ...newUploads[fileIndex],
-              progress: data.percentage,
-              status: data.completed ? 'completed' : 'uploading',
-              lastUpdate: now,
-              uploadedBytes: currentBytes,
-              speed,
-              timeRemaining
-            };
-
-            // 전체 진행률 업데이트
-            const totalProgress = newUploads.reduce((acc, file) => acc + file.progress, 0) / newUploads.length;
-            setOverallProgress(totalProgress);
-          } else {
-            // 업데이트 간격이 너무 짧으면 진행률만 업데이트
-            newUploads[fileIndex] = {
-              ...newUploads[fileIndex],
-              progress: data.percentage,
-              status: data.completed ? 'completed' : 'uploading',
-              uploadedBytes: currentBytes
-            };
+            console.log('[UploadProgress] 속도 계산:', {
+              파일: fileName,
+              경과시간: timeDiff.toFixed(2) + '초',
+              전송바이트: byteDiff,
+              속도: Math.round(speed / 1024) + 'KB/s'
+            });
           }
+
+          // 남은 시간 계산 (초)
+          let timeRemaining = 0;
+          if (speed > 0) {
+            const remainingBytes = currentFile.size - currentBytes;
+            timeRemaining = remainingBytes / speed;
+            console.log('[UploadProgress] 남은 시간 계산:', {
+              파일: fileName,
+              남은바이트: remainingBytes,
+              속도: Math.round(speed / 1024) + 'KB/s',
+              남은시간: timeRemaining.toFixed(1) + '초'
+            });
+          }
+
+          // 파일 진행률 업데이트 (속도 및 남은 시간 포함)
+          newUploads[fileIndex] = {
+            ...currentFile,
+            progress: data.percentage,
+            status: data.completed ? 'completed' : 'uploading',
+            lastUpdate: now,
+            uploadedBytes: currentBytes,
+            speed,
+            timeRemaining
+          };
+
+          // 전체 진행률 업데이트
+          const totalProgress = newUploads.reduce((acc, file) => acc + file.progress, 0) / newUploads.length;
+          setOverallProgress(totalProgress);
+        } else {
+          // 업데이트 간격이 너무 짧으면 진행률만 업데이트
+          newUploads[fileIndex] = {
+            ...newUploads[fileIndex],
+            progress: data.percentage,
+            status: data.completed ? 'completed' : 'uploading',
+            uploadedBytes: currentBytes
+          };
         }
 
         return newUploads;
@@ -1318,14 +1310,17 @@ const FileManager: React.FC = () => {
 
     // 업로드 취소 완료 리스너
     const handleUploadCancelled = (_: any, data: any) => {
-      console.log('업로드 취소 완료:', data);
+      // 업로드 취소 완료 이벤트 처리
+      console.log('[UploadCancel] 업로드 취소 완료:', data);
 
       if (data.success) {
         // 모든 업로드 작업 취소 완료
         setIsUploading(false);
+        console.log('[UploadCancel] 모든 업로드 취소 완료');
 
         // 진행 중이던 모든 파일을 '취소됨' 상태로 변경
         setFileUploads(prev => {
+          console.log('[UploadCancel] 파일 상태 업데이트: 취소됨으로 설정');
           return prev.map(file => {
             if (file.status === 'uploading') {
               return {
@@ -1337,6 +1332,20 @@ const FileManager: React.FC = () => {
             }
             return file;
           });
+        });
+
+        // 토스트 알림
+        toast({
+          title: '업로드 취소됨',
+          description: '모든 파일 업로드가 취소되었습니다.'
+        });
+      } else {
+        // 취소 실패 처리
+        console.error('[UploadCancel] 업로드 취소 실패:', data.error);
+        toast({
+          title: '업로드 취소 실패',
+          description: data.error || '알 수 없는 오류',
+          variant: 'destructive'
         });
       }
     };

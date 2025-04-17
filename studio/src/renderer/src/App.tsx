@@ -1,12 +1,20 @@
 import React, { useState } from 'react'
-// import './App.css'
 import Builds from './components/Builds'
 import Settings from './components/Settings'
 import DesignEditor from './components/DesignEditor'
 import FileManager from './components/FileManager'
+import { ErrorDialogProvider, useErrorDialog, setErrorDialogFunction } from './components/ErrorDialog'
 
-function App(): JSX.Element {
+// ErrorDialog를 사용하는 내부 컴포넌트
+function AppContent(): JSX.Element {
   const [activePage, setActivePage] = useState<string>('builds')
+  const { showError } = useErrorDialog();
+
+  // 전역 에러 함수 설정
+  React.useEffect(() => {
+    setErrorDialogFunction(showError);
+    return () => setErrorDialogFunction(() => {});
+  }, [showError]);
 
   const renderContent = () => {
     switch (activePage) {
@@ -19,7 +27,7 @@ function App(): JSX.Element {
       case 'files':
         return <FileManager />
       default:
-          return <Builds />
+        return <Builds />
     }
   }
 
@@ -121,9 +129,18 @@ function App(): JSX.Element {
 
       {/* 메인 콘텐츠 영역 */}
       <div className="flex-1 flex flex-col">
-          {renderContent()}
+        {renderContent()}
       </div>
     </div>
+  )
+}
+
+// 루트 App 컴포넌트: ErrorDialogProvider로 래핑
+function App(): JSX.Element {
+  return (
+    <ErrorDialogProvider>
+      <AppContent />
+    </ErrorDialogProvider>
   )
 }
 

@@ -22,6 +22,7 @@ import {
 import { UploadCloud, FilePlus, File, X, Loader2, Download, Trash } from 'lucide-react';
 import { Version, VersionFile } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
+import { showGlobalError } from './ErrorDialog';
 
 interface EditVersionDialogProps {
   showDialog: boolean;
@@ -70,6 +71,7 @@ export default function EditVersionDialog({
   toast,
   cancelUpload
 }: EditVersionDialogProps) {
+
   const handleOpenChange = (open: boolean) => {
     if (!open && isUploading) {
       if (cancelUpload) {
@@ -95,6 +97,7 @@ export default function EditVersionDialog({
 
     setShowDialog(open);
   };
+  const cdnUrl = JSON.parse(localStorage.getItem('settings') || '{}').cdnUrl || '';
 
   return (
     <Dialog open={showDialog} onOpenChange={handleOpenChange}>
@@ -250,14 +253,14 @@ export default function EditVersionDialog({
                 </div>
               )}
 
-              {selectedVersion.files && selectedVersion.files.files && selectedVersion.files.files.length > 0 ? (
+              {selectedVersion.files && selectedVersion.files && selectedVersion?.files?.length > 0 ? (
                 <div className="mb-4">
                   <div className="text-xs font-medium mb-2">
-                    현재 파일 목록 ({selectedVersion.files?.totalCount || selectedVersion.files?.files.length}개)
+                    현재 파일 목록 ({selectedVersion.files?.totalCount || selectedVersion.files?.length}개)
                     {selectedVersion.files?.totalSize ? ` (총 ${formatFileSize(selectedVersion.files?.totalSize)})` : ''}
                   </div>
                   <div className="max-h-40 overflow-y-auto border rounded-md">
-                    {selectedVersion.files.files.map((file) => (
+                    {selectedVersion.files.map((file) => (
                       <div key={file.id} className="flex items-center justify-between p-2 hover:bg-gray-50 border-b last:border-b-0">
                         <div className="flex items-center space-x-2 flex-1">
                           <File className="h-3 w-3 text-blue-500" />
@@ -272,8 +275,10 @@ export default function EditVersionDialog({
                           <button
                             type="button"
                             onClick={() => {
-                              if (file.download_url) {
-                                window.open(file.download_url, '_blank')
+                              if (file.fileUrl && cdnUrl) {
+                                window.open(`${cdnUrl}/${file.fileUrl.replace(/^\//, '')}`, '_blank')
+                              } else {
+                                showGlobalError('다운로드 실패', '다운로드 링크가 없습니다.');
                               }
                             }}
                             className="text-blue-500 hover:text-blue-600"

@@ -11,6 +11,9 @@ import { tmpdir } from 'os'
 // 환경설정 파일 경로
 const settingsFilePath = join(app.getPath('userData'), 'settings.dat')
 
+// 윈도우 설정 파일 경로
+const windowSettingsFilePath = join(app.getPath('userData'), 'window-settings.json')
+
 // 암호화 키 (실제 앱에서는 더 안전한 방법으로 관리해야 합니다)
 const ENCRYPTION_KEY = 'gamelauncher-secure-encryption-key-2024'
 
@@ -37,11 +40,63 @@ if (!gotTheLock) {
 // 미리 생성된 키 (성능 향상을 위해 전역으로 한 번만 생성)
 const ENCRYPTION_KEY_BUFFER = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
 
+// 윈도우 설정을 저장하는 함수
+function saveWindowSettings(window: BrowserWindow): void {
+  try {
+    // 현재 창 상태 가져오기
+    const { width, height, x, y, isMaximized } = window.getBounds() as { width: number; height: number; x: number; y: number; isMaximized?: boolean };
+
+    // 최대화 상태 확인
+    const maximized = window.isMaximized();
+
+    // 윈도우 설정 객체 생성
+    const windowSettings = {
+      width,
+      height,
+      x,
+      y,
+      maximized
+    };
+
+    // JSON으로 변환하여 파일에 저장
+    fs.writeFileSync(windowSettingsFilePath, JSON.stringify(windowSettings));
+    console.log('윈도우 설정 저장됨:', windowSettings);
+  } catch (error) {
+    console.error('윈도우 설정 저장 중 오류:', error);
+  }
+}
+
+// 윈도우 설정을 로드하는 함수
+function loadWindowSettings(): { width: number; height: number; x?: number; y?: number; maximized?: boolean } {
+  try {
+    // 설정 파일이 존재하는지 확인
+    if (fs.existsSync(windowSettingsFilePath)) {
+      // 파일에서 설정 로드
+      const settings = JSON.parse(fs.readFileSync(windowSettingsFilePath, 'utf-8'));
+      console.log('윈도우 설정 로드됨:', settings);
+      return settings;
+    }
+  } catch (error) {
+    console.error('윈도우 설정 로드 중 오류:', error);
+  }
+
+  // 기본 설정 반환
+  return {
+    width: 1600,
+    height: 900
+  };
+}
+
 function createWindow(): void {
+  // 이전 윈도우 설정 로드
+  const windowSettings = loadWindowSettings();
+
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 900,
+    width: windowSettings.width,
+    height: windowSettings.height,
+    x: windowSettings.x,
+    y: windowSettings.y,
     show: false,
     autoHideMenuBar: true,
     minWidth: 800,
@@ -57,6 +112,40 @@ function createWindow(): void {
       allowRunningInsecureContent: false
     }
   })
+
+  // 윈도우가 최대화된 상태로 저장되었으면 최대화
+  if (windowSettings.maximized) {
+    mainWindow.maximize();
+  }
+
+  // 윈도우 크기 변경 이벤트 처리
+  mainWindow.on('resize', () => {
+    if (!mainWindow.isMaximized()) {
+      saveWindowSettings(mainWindow);
+    }
+  });
+
+  // 윈도우 위치 변경 이벤트 처리
+  mainWindow.on('move', () => {
+    if (!mainWindow.isMaximized()) {
+      saveWindowSettings(mainWindow);
+    }
+  });
+
+  // 윈도우 최대화 이벤트 처리
+  mainWindow.on('maximize', () => {
+    saveWindowSettings(mainWindow);
+  });
+
+  // 윈도우 최대화 해제 이벤트 처리
+  mainWindow.on('unmaximize', () => {
+    saveWindowSettings(mainWindow);
+  });
+
+  // 윈도우 닫기 이벤트 처리
+  mainWindow.on('close', () => {
+    saveWindowSettings(mainWindow);
+  });
 
   // CSP 설정 1: 세션 수준에서 CSP 설정 (모든 요청에 적용)
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {

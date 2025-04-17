@@ -43,6 +43,7 @@ import { useToast } from '@/components/ui/use-toast'
 import BuildForm from './BuildForm'
 import crypto from 'crypto'
 import VersionManager from './VersionManager'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 function Builds(): JSX.Element {
   const { toast } = useToast()
@@ -73,14 +74,14 @@ function Builds(): JSX.Element {
 
   // New build information
   const [newBuild, setNewBuild] = useState<Build>({
-    name: 'First Build',
+    name: '',
     version: '1',
     description: '',
     status: 'development',
     size: 0,
     download_url: '/',
     build_number: 1,
-    platform: 'android',
+    platform: 'windows',
     build_path: '/'
   })
 
@@ -158,13 +159,6 @@ function Builds(): JSX.Element {
       errors.build_number = 'Build number must be a number';
     }
 
-    if (newBuild.download_url && newBuild.download_url !== '/') {
-      if (!newBuild.download_url.startsWith('http://') &&
-          !newBuild.download_url.startsWith('https://') &&
-          !newBuild.download_url.startsWith('/uploads/')) {
-        errors.download_url = 'Invalid URL format (must start with http://, https://, or be an uploaded file)'
-      }
-    }
 
     // Don't update errors state if nothing has changed to avoid unnecessary re-renders
     const currentErrorCount = Object.keys(formErrors).filter(k => !!formErrors[k as keyof typeof formErrors]).length;
@@ -187,8 +181,7 @@ function Builds(): JSX.Element {
       setNewBuild(prev => ({ ...prev, size: parseFloat(fileSizeMB) }));
 
       // Calculate MD5 hash
-      const buffer = await file.arrayBuffer();
-      const hash = crypto.createHash('md5').update(Buffer.from(buffer)).digest('hex');
+      const hash = await generateMD5Hash(file);
       setFileHash(hash);
 
       addDebugLog(`File selected: ${file.name} (${fileSizeMB} MB)`, 'info');
@@ -231,18 +224,30 @@ function Builds(): JSX.Element {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            onChange={(e) => {
-              if (e.target.files && e.target.files.length > 0) {
-                handleFileSelect(e.target.files[0]);
-              }
-            }}
+            onChange={handleFileSelect}
+            accept=".exe,.dmg,.apk,.zip,.app,.appx,.ipa,.msi"
           />
         </div>
 
         {setupFile && (
           <div className="mt-2 text-sm">
-            <p className="font-medium">{setupFile.name}</p>
-            <p className="text-gray-500">Size: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+            <div className="flex items-center justify-between">
+              <p className="font-medium">{setupFile.name}</p>
+              <p className="text-gray-500">{(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+            </div>
+            {isUploading && (
+              <div className="mt-1">
+                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1 text-right">
+                  {uploadProgress < 100 ? `${uploadProgress.toFixed(0)}%` : "처리 중..."}
+                </p>
+              </div>
+            )}
             {fileHash && <p className="text-gray-500 truncate">MD5: {fileHash}</p>}
           </div>
         )}
@@ -256,30 +261,32 @@ function Builds(): JSX.Element {
       <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Uploading Build File</DialogTitle>
+            <DialogTitle>파일 업로드 중</DialogTitle>
             <DialogDescription>
               {uploadProgress < 100
-                ? "Please wait while your build file is being uploaded to the server."
-                : "Upload completed successfully!"}
+                ? "파일을 서버에 업로드하는 중입니다. 잠시만 기다려주세요."
+                : "업로드가 완료되었습니다!"}
             </DialogDescription>
           </DialogHeader>
           <div className="py-6">
-            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden dark:bg-gray-700">
               <div
-                className="bg-blue-600 h-full rounded-full transition-all duration-300"
+                className={`h-full rounded-full transition-all duration-300 ${
+                  uploadProgress < 100 ? "bg-blue-600" : "bg-green-500"
+                }`}
                 style={{ width: `${uploadProgress}%` }}
               ></div>
             </div>
-            <p className="text-center mt-4 text-sm">
+            <p className="text-center mt-3 text-sm font-medium text-gray-700 dark:text-gray-300">
               {uploadProgress < 100
-                ? `${uploadProgress.toFixed(0)}% complete`
-                : "Processing your build..."}
+                ? `${uploadProgress.toFixed(0)}% 완료`
+                : "처리 중..."}
             </p>
             {setupFile && (
-              <div className="mt-4 text-sm text-slate-500">
-                <p>File: {setupFile.name}</p>
-                <p>Size: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                <p>MD5: {fileHash}</p>
+              <div className="mt-4 text-sm space-y-1 p-3 bg-gray-50 rounded-md dark:bg-gray-800">
+                <p className="font-medium">{setupFile.name}</p>
+                <p className="text-gray-500 dark:text-gray-400">크기: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                {fileHash && <p className="text-gray-500 dark:text-gray-400 truncate">해시: {fileHash}</p>}
               </div>
             )}
           </div>
@@ -287,9 +294,18 @@ function Builds(): JSX.Element {
             {uploadProgress === 100 && (
               <Button
                 onClick={() => setIsUploadDialogOpen(false)}
-                disabled={isSubmitting}
+                className="w-full sm:w-auto"
               >
-                Close
+                확인
+              </Button>
+            )}
+            {uploadProgress < 100 && (
+              <Button
+                variant="outline"
+                onClick={() => setIsUploadDialogOpen(false)}
+                className="w-full sm:w-auto"
+              >
+                배경에서 계속하기
               </Button>
             )}
           </DialogFooter>
@@ -438,14 +454,6 @@ function Builds(): JSX.Element {
         return !value ? 'Status is required' : ''
       case 'download_url':
         if (!value) return ''
-        try {
-          // Simple URL validation
-          if (!value.startsWith('http://') && !value.startsWith('https://') && !value.startsWith('/uploads/')) {
-            return 'Invalid URL format (must start with http://, https://, or be an uploaded file)'
-          }
-        } catch (e) {
-          return 'Invalid URL format'
-        }
         return ''
       default:
         return ''
@@ -473,164 +481,210 @@ function Builds(): JSX.Element {
   const generateMD5Hash = async (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = function(event) {
+      reader.onload = async function(event) {
         if (!event.target || !event.target.result) {
           reject(new Error('Failed to read file'));
           return;
         }
 
-        // ArrayBuffer에서 MD5 해시 계산
-        const buffer = event.target.result as ArrayBuffer;
-        const hashBuffer = crypto.createHash('md5').update(Buffer.from(buffer)).digest();
-        const hashHex = hashBuffer.toString('hex');
-        resolve(hashHex);
+        try {
+          const buffer = event.target.result as ArrayBuffer;
+
+          // Web Crypto API 사용
+          const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
+
+          // ArrayBuffer를 16진수 문자열로 변환
+          const hashArray = Array.from(new Uint8Array(hashBuffer));
+          const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+          resolve(hashHex);
+        } catch (error) {
+          reject(error);
+        }
       };
+
       reader.onerror = function() {
         reject(new Error('Failed to read file'));
       };
+
       reader.readAsArrayBuffer(file);
     });
   };
 
+  // S3 설정 가져오기 함수
+  const getS3Config = async () => {
+    try {
+      if (!window.api || typeof window.api.getS3Config !== 'function') {
+        console.error('window.api.getS3Config 함수가 정의되지 않았습니다.');
+
+        // localStorage에서 정보 가져오기 (대체 방법)
+        const settings = JSON.parse(localStorage.getItem('settings') || '{}');
+        return {
+          bucket: settings.bucketName || 'my-default-bucket',
+          accessKeyId: settings.accessKey || '',
+          secretAccessKey: settings.secretKey || '',
+          region: settings.region || 'ap-northeast-2',
+          cdnUrl: settings.cdnUrl || ''
+        };
+      }
+
+      const config = await window.api.getS3Config();
+      if (!config) {
+        throw new Error('S3 설정을 가져오지 못했습니다');
+      }
+
+      return config;
+    } catch (error) {
+      console.error('S3 설정 가져오기 오류:', error);
+      toast({
+        title: 'S3 설정 오류',
+        description: '설정을 가져오는 중 오류가 발생했습니다. 기본값을 사용합니다.'
+      });
+
+      // 오류 발생 시 기본값 반환
+      return {
+        bucket: 'my-default-bucket',
+        accessKeyId: '',
+        secretAccessKey: '',
+        region: 'ap-northeast-2',
+        cdnUrl: ''
+      };
+    }
+  };
   // S3 업로드 함수
   const uploadFileToS3 = async (file: File): Promise<{ url: string, md5: string }> => {
+    let tempFilePath: string | null = null;
+
     try {
-      // 파일 MD5 해시 계산
-      const md5Hash = await generateMD5Hash(file);
-      addDebugLog(`File MD5 hash: ${md5Hash}`, 'info');
-
-      // 설정에서 S3 버킷 정보 가져오기
-      const settings = JSON.parse(localStorage.getItem('settings') || '{}');
-      const bucket = settings.s3Bucket || 'gamepot-builds';
-
-      // 플랫폼 경로 추가 - 현재 빌드 플랫폼에 따라 폴더 구조화
-      const platform = newBuild.platform || 'unknown';
-
-      // Key 생성 (경로/플랫폼/파일명) - 파일 관리가 용이하도록 구조화
-      const key = `builds/${platform}/${Date.now()}-${file.name}`;
-      const metadataKey = `${key}.metadata.json`;
-
-      // 업로드 진행 다이얼로그 표시
       setIsUploading(true);
-      setUploadProgress(0);
-
-      // 진행 표시 시뮬레이션 시작
-      const progressInterval = setInterval(() => {
-      setUploadProgress(prev => {
-          if (prev >= 95) {
-            clearInterval(progressInterval);
-            return prev;
-          }
-          return prev + Math.random() * 10; // 좀 더 자연스러운 진행률
+      const s3Config = await getS3Config();
+      if (!s3Config) {
+        toast({
+          title: 'S3 설정 오류',
+          description: 'S3 설정을 가져올 수 없습니다',
+          variant: "destructive"
         });
-      }, 300);
+        setIsUploading(false);
+        throw new Error('S3 설정을 가져올 수 없습니다');
+      }
 
-      addDebugLog(`S3 업로드 시작: ${file.name} (플랫폼: ${platform})`, 'info');
+      const { bucket, region, accessKeyId, secretAccessKey, cdnUrl } = s3Config;
 
-      // 파일을 Blob으로 변환하여 업로드에 사용할 임시 파일 생성
-      const buffer = await file.arrayBuffer();
-      const tempFilePath = await (window as any).api.saveTempFile({
-        buffer: Array.from(new Uint8Array(buffer)),
-        fileName: file.name
+      // 랜덤 4자리 문자열 생성
+      const randomPrefix = Math.random().toString(36).substring(2, 6);
+
+      // 파일 이름에서 확장자 추출
+      const originalName = file.name;
+      const fileExtension = originalName.includes('.') ?
+        originalName.substring(originalName.lastIndexOf('.')) : '';
+      const fileNameWithoutExt = originalName.includes('.') ?
+        originalName.substring(0, originalName.lastIndexOf('.')) : originalName;
+
+      // 새 파일 이름 생성 (xxxx_파일명.확장자)
+      const newFileName = `${randomPrefix}_${fileNameWithoutExt}${fileExtension}`;
+      const key = `builds/${editingBuild?.id || 'new'}/${newFileName}`;
+
+      // 임시 파일 생성
+      tempFilePath = await window.api.createTempFile({
+        fileName: file.name,
+        totalSize: file.size
       });
 
       if (!tempFilePath) {
-        throw new Error("임시 파일 생성에 실패했습니다.");
+        toast({
+          title: '파일 생성 오류',
+          description: '임시 파일 생성 실패',
+          variant: "destructive"
+        });
+        setIsUploading(false);
+        throw new Error('임시 파일 생성 실패');
       }
 
-      addDebugLog(`임시 파일 생성됨: ${tempFilePath}`, 'info');
-
-      // S3 업로드 실행 - 객체 형태로 파라미터 전달
-      const uploadResult = await (window as any).api.uploadFileToS3({
+      // 파일을 한 번에 업로드
+      const buffer = await file.arrayBuffer();
+      const result = await window.api.appendToTempFile({
         filePath: tempFilePath,
-        bucket: bucket,
-        key: key
+        buffer,
+        offset: 0
       });
 
-      // 진행률 업데이트 중지 및 완료 표시
-      clearInterval(progressInterval);
-      setUploadProgress(100);
+      if (!result.success) {
+        console.error('파일 업로드 실패:', result.error);
+        toast({
+          title: '파일 업로드 오류',
+          description: `파일 업로드 실패: ${result.error}`,
+          variant: "destructive"
+        });
+        setIsUploading(false);
+        throw new Error(result.error);
+      }
 
-      // 임시 파일 삭제
-      await (window as any).api.deleteTempFile({ filePath: tempFilePath });
-      addDebugLog(`임시 파일 삭제됨: ${tempFilePath}`, 'info');
+      // 진행률 표시 (50%)
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 50
+      }));
+
+      // 임시 파일을 S3에 업로드
+      const uploadResult = await window.api.uploadFileToS3({
+        filePath: tempFilePath,
+        bucket,
+        key,
+        accessKeyId,
+        secretAccessKey,
+        region
+      });
 
       if (!uploadResult.success) {
-        throw new Error(`S3 업로드 실패: ${uploadResult.error}`);
-      }
-
-      // 메타데이터 생성 (빌드 정보 포함)
-      const metadata = {
-        md5: md5Hash,
-        fileName: file.name,
-        fileSize: file.size,
-        platform: platform,
-        version: newBuild.version || '',
-        name: newBuild.name || '',
-        build_number: newBuild.build_number || 0,
-        uploadedAt: new Date().toISOString()
-      };
-
-      addDebugLog(`메타데이터 정보: ${JSON.stringify(metadata)}`, 'info');
-
-      // 메타데이터 파일 업로드 - 실제 구현은 여기서 추가해야 함
-      // 메타데이터를 JSON 문자열로 변환하여 임시 파일로 저장
-      const metadataStr = JSON.stringify(metadata, null, 2);
-      const metadataFilePath = await (window as any).api.saveTempFile({
-        buffer: Array.from(new TextEncoder().encode(metadataStr)),
-        fileName: 'metadata.json'
-      });
-
-      if (metadataFilePath) {
-        // 메타데이터 파일 S3 업로드
-        const metadataUploadResult = await (window as any).api.uploadFileToS3({
-          filePath: metadataFilePath,
-          bucket: bucket,
-          key: metadataKey
+        console.error('S3 업로드 실패:', uploadResult.error);
+        toast({
+          title: 'S3 업로드 오류',
+          description: `S3 업로드 실패: ${uploadResult.error}`,
+          variant: "destructive"
         });
-
-        // 임시 메타데이터 파일 삭제
-        await (window as any).api.deleteTempFile({ filePath: metadataFilePath });
-
-        if (metadataUploadResult.success) {
-          addDebugLog(`메타데이터 파일 업로드 완료: ${metadataKey}`, 'success');
-        } else {
-          addDebugLog(`메타데이터 파일 업로드 실패: ${metadataUploadResult.error}`, 'warning');
-        }
+        setIsUploading(false);
+        throw new Error(uploadResult.error);
       }
 
-      // 업로드 결과 URL 가공 - 다운로드 링크 형식으로 변환
-      let downloadUrl = uploadResult.location;
+      // S3 업로드 완료 시 진행률 100%로 설정
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 100
+      }));
 
-      // CDN URL이 설정되어 있는 경우 CDN URL로 변경
-      const cdnUrl = settings.cdnUrl;
-      if (cdnUrl && !downloadUrl.startsWith(cdnUrl)) {
-        // CDN URL로 변환 시도
-        try {
-          const urlObj = new URL(downloadUrl);
-          const pathParts = urlObj.pathname.split('/');
-          const cdnPath = pathParts.slice(1).join('/'); // 버킷 이름 제외
-          downloadUrl = `${cdnUrl}/${cdnPath}`;
-          addDebugLog(`CDN URL로 변환됨: ${downloadUrl}`, 'info');
-        } catch (err) {
-          const error = err as Error;
-          addDebugLog(`CDN URL 변환 실패, 원본 URL 사용: ${error.message}`, 'warning');
-        }
-      }
+      console.log(`S3 업로드 완료: ${file.name} -> ${key}`);
 
-      addDebugLog(`S3 업로드 완료: ${downloadUrl}`, 'success');
+      // 파일 정보 준비
+      const fileUrl = `/${key}`;
 
-      // 업로드 성공 후 다운로드 URL과 MD5 해시 반환
+      // MD5 해시 계산
+      console.log(`MD5 해시 계산 중: ${file.name}`);
+      const md5Hash = await generateMD5Hash(file);
+      console.log(`MD5 해시 완료: ${md5Hash}`);
+
       return {
-        url: downloadUrl,
+        url: fileUrl,
         md5: md5Hash
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      addDebugLog(`S3 업로드 오류: ${errorMessage}`, 'error');
-      setUploadProgress(0);
+      console.error('파일 업로드 중 오류:', error);
+      toast({
+        title: '업로드 오류',
+        description: `파일 업로드 실패: ${error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'}`,
+        variant: "destructive"
+      });
       throw error;
     } finally {
+      // 임시 파일 삭제 시도
+      if (tempFilePath) {
+        try {
+          await window.api.deleteTempFile({ filePath: tempFilePath });
+          console.log(`임시 파일 삭제 완료: ${tempFilePath}`);
+        } catch (deleteError) {
+          console.warn(`임시 파일 삭제 실패: ${tempFilePath}`, deleteError);
+        }
+      }
+
       setIsUploading(false);
     }
   };
@@ -721,44 +775,93 @@ function Builds(): JSX.Element {
   // 파일 업로드 처리 함수
   const handleFileUpload = async (file: File) => {
     setSetupFile(file);
+    setUploadProgress(0);
+    setIsUploading(true);
 
-    // 파일 크기 MB로 변환
     const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
     addDebugLog(`파일 선택됨: ${file.name} (${fileSizeInMB} MB)`, 'info');
 
     try {
-      // S3에 파일 업로드
       const { url, md5 } = await uploadFileToS3(file);
 
-      // 빌드 데이터에 다운로드 URL과 크기, MD5 해시 업데이트
-      setNewBuild(prev => ({
-        ...prev,
-        size: parseFloat(fileSizeInMB),
-        download_url: url,
-        md5_hash: md5 // MD5 해시 저장 (API에서 이 필드를 지원한다고 가정)
-      }));
+      if (editingBuild) {
+        setEditingBuild(prev => ({
+          ...prev!,
+          size: parseFloat(fileSizeInMB),
+          download_url: url,
+          md5_hash: md5
+        }));
+      } else {
+        setNewBuild(prev => ({
+          ...prev,
+          size: parseFloat(fileSizeInMB),
+          download_url: url,
+          md5_hash: md5
+        }));
+      }
 
-      // 폼 오류 업데이트 (다운로드 URL 관련 오류 제거)
-      setFormErrors(prev => ({
-        ...prev,
-        download_url: ''
-      }));
+      toast({
+        description: "파일이 성공적으로 업로드되었습니다.",
+        variant: "default"
+      });
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      setFormErrors(prev => ({
-        ...prev,
-        download_url: `파일 업로드 실패: ${errorMessage}`
-      }));
+
+      toast({
+        description: `파일 업로드 실패: ${errorMessage}`,
+        variant: "destructive"
+      });
+
+      if (editingBuild) {
+        setEditFormErrors(prev => ({
+          ...prev,
+          download_url: `파일 업로드 실패: ${errorMessage}`
+        }));
+      } else {
+        setFormErrors(prev => ({
+          ...prev,
+          download_url: `파일 업로드 실패: ${errorMessage}`
+        }));
+      }
+    } finally {
+      setIsUploading(false);
     }
   };
 
   // 파일 선택 핸들러 수정
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
 
-    handleFileUpload(files[0]);
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // 파일 크기 제한 (1GB)
+    if (file.size > 1024 * 1024 * 1024) {
+      toast({
+        title: '파일 크기 초과',
+        description: '파일 크기는 1GB를 초과할 수 없습니다.',
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // 파일 크기를 MB로 변환
+    const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
+
+    if (editingBuild) {
+      setEditSetupFile(file);
+      setEditingBuild(prev => ({
+        ...prev!,
+        size: parseFloat(fileSizeInMB)
+      }));
+    } else {
+      setSetupFile(file);
+      setNewBuild(prev => ({
+        ...prev,
+        size: parseFloat(fileSizeInMB)
+      }));
+    }
   };
 
   // Add a log to debug panel
@@ -790,14 +893,14 @@ function Builds(): JSX.Element {
   // Reset form state to default values
   const resetFormState = () => {
     setNewBuild({
-      name: 'First Build',
+      name: '',
       version: '1',
       description: '',
       status: 'development',
       size: 0,
       download_url: '/',
       build_number: 1,
-      platform: 'android',
+      platform: 'windows',
       build_path: '/'
     });
 
@@ -869,8 +972,8 @@ function Builds(): JSX.Element {
 
       // Close dialog and refresh builds list
       toast({
-        message: "Build added successfully!",
-        type: "success"
+        description: "Build added successfully!",
+        variant: "default"
       });
 
       setShowAddBuildDialog(false);
@@ -933,16 +1036,7 @@ function Builds(): JSX.Element {
       case 'status':
         return !value ? 'Status is required' : ''
       case 'download_url':
-        if (!value) return ''
-        try {
-          // Simple URL validation
-          if (!value.startsWith('http://') && !value.startsWith('https://') && !value.startsWith('/uploads/')) {
-            return 'Invalid URL format (must start with http://, https://, or be an uploaded file)'
-          }
-        } catch (e) {
-          return 'Invalid URL format'
-        }
-        return ''
+       return !value ? 'Download URL is required' : ''
       default:
         return ''
     }
@@ -968,48 +1062,66 @@ function Builds(): JSX.Element {
   }
 
   // Handle file selection for edit dialog
-  const handleEditFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleEditFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!editingBuild) return;
 
-    const files = e.target.files
+    const files = e.target.files;
     if (files && files.length > 0) {
-      const file = files[0]
-      setEditSetupFile(file)
+      const file = files[0];
+      setEditSetupFile(file);
 
-      // Validate file type
-      const allowedTypes = ['.exe', '.dmg', '.apk', '.zip', '.app', '.appx', '.ipa', '.msi']
-      const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
-      let fileError = ''
-
-      if (!allowedTypes.includes(fileExtension)) {
-        fileError = 'Unsupported file type. Please upload an executable file.'
-        addDebugLog(`Invalid file type: ${fileExtension}`, 'error')
+      // 파일 크기 제한 (1GB)
+      if (file.size > 1024 * 1024 * 1024) {
+        setEditFormErrors({
+          ...editFormErrors,
+          download_url: '파일 크기는 1GB를 초과할 수 없습니다.'
+        });
+        return;
       }
 
-      // Auto-update size field based on file size
-      const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2)
+      // 파일 타입 검증
+      const allowedTypes = ['.exe', '.dmg', '.apk', '.zip', '.app', '.appx', '.ipa', '.msi'];
+      const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      if (!allowedTypes.includes(fileExtension)) {
+        setEditFormErrors({
+          ...editFormErrors,
+          download_url: '지원하지 않는 파일 형식입니다. 실행 파일을 업로드하세요.'
+        });
+        return;
+      }
 
-      // Create a virtual download URL for the uploaded file
-      const fakeDownloadUrl = `/uploads/${file.name}`
+      // 파일 크기를 MB로 변환
+      const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
 
-      // Update both size and downloadUrl
-      setEditingBuild({
-        ...editingBuild,
-        size: parseFloat(fileSizeInMB),
-        download_url: fakeDownloadUrl
-      })
+      try {
+        // 파일 업로드 시작
+        const { url, md5 } = await uploadFileToS3(file);
 
-      // Set or clear error
-      setEditFormErrors({
-        ...editFormErrors,
-        download_url: fileError
-      })
+        // 빌드 정보 업데이트
+        setEditingBuild({
+          ...editingBuild,
+          size: parseFloat(fileSizeInMB),
+          download_url: url,
+          md5_hash: md5
+        });
 
-      // Log to debug panel
-      addDebugLog(`File selected for edit: ${file.name} (${fileSizeInMB} MB)`, 'info')
-      addDebugLog(`Virtual download URL created: ${fakeDownloadUrl}`, 'info')
+        // 에러 초기화
+        setEditFormErrors({
+          ...editFormErrors,
+          download_url: ''
+        });
+
+        // 디버그 로그 추가
+        addDebugLog(`수정을 위한 파일 업로드 완료: ${file.name} (${fileSizeInMB} MB)`, 'info');
+      } catch (error) {
+        console.error('파일 업로드 실패:', error);
+        setEditFormErrors({
+          ...editFormErrors,
+          download_url: '파일 업로드에 실패했습니다.'
+        });
+      }
     }
-  }
+  };
 
   // Function to handle file browse button click for edit
   const handleEditBrowseClick = () => {
@@ -1040,6 +1152,7 @@ function Builds(): JSX.Element {
     setIsEditSubmitting(true)
     setEditSubmitError(null)
 
+
     // Add to debug logs
     addDebugLog(`API call: PUT /builds/${editingBuild.id}`, 'info')
 
@@ -1051,6 +1164,10 @@ function Builds(): JSX.Element {
         setIsEditSubmitting(false);
         // Keep dialog open for error message
         return;
+      }
+      addDebugLog(`editSetupFile: ${editSetupFile}`, 'info')
+      if (editSetupFile) {
+        await handleFileUpload(editSetupFile)
       }
 
       // 빌드 업데이트
@@ -1068,9 +1185,9 @@ function Builds(): JSX.Element {
 
       // 성공 메시지 표시
       toast({
-        message: "Build has been successfully updated",
-        type: "success"
-      })
+        description: "Build has been successfully updated",
+        variant: "default"
+      });
     } catch (err) {
       console.error('Failed to update build:', err)
 
@@ -1160,8 +1277,8 @@ function Builds(): JSX.Element {
 
       // 성공 메시지 표시
       toast({
-        message: "빌드가 성공적으로 삭제되었습니다",
-        type: "success"
+        description: "빌드가 성공적으로 삭제되었습니다",
+        variant: "default"
       });
     } catch (err) {
       console.error('Failed to delete build:', err)
@@ -1194,8 +1311,8 @@ function Builds(): JSX.Element {
 
       // 오류 메시지 표시
       toast({
-        message: `빌드 삭제 실패: ${errorMessage}`,
-        type: "error"
+        description: `빌드 삭제 실패: ${errorMessage}`,
+        variant: "destructive"
       });
 
       // Keep dialog open for error message
@@ -1222,79 +1339,6 @@ function Builds(): JSX.Element {
     }
   }
 
-  // Debug Panel Component
-  const DebugPanel = () => {
-    if (!showDebugPanel) return null
-
-    const getLogColor = (type: 'info' | 'success' | 'error' | 'warning') => {
-      switch (type) {
-        case 'info': return 'text-blue-600'
-        case 'success': return 'text-green-600'
-        case 'error': return 'text-red-600'
-        case 'warning': return 'text-yellow-600'
-        default: return 'text-gray-600'
-      }
-    }
-
-    return (
-      <div className="fixed bottom-0 right-0 w-96 h-80 bg-white border-l border-t shadow-lg z-50 flex flex-col">
-        <div className="bg-gray-100 p-2 flex justify-between items-center border-b">
-          <div className="text-sm font-medium">Debug Console</div>
-          <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-[10px]"
-              onClick={clearDebugLogs}
-            >
-              Clear
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-[10px]"
-              onClick={() => setShowDebugPanel(false)}
-            >
-              Close
-            </Button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-auto p-2 bg-gray-50 text-xs">
-          {debugLogs.length === 0 ? (
-            <div className="text-gray-400 italic text-center mt-2">No logs yet</div>
-          ) : (
-            <div className="space-y-1">
-              {debugLogs.map((log, index) => (
-                <div key={index} className={`${getLogColor(log.type)}`}>
-                  <span className="text-gray-400 mr-1">
-                    {log.timestamp.toLocaleTimeString()}
-                  </span>
-                  {log.message}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="p-2 border-t bg-gray-100">
-          <div className="text-xs text-gray-500 grid grid-cols-2 gap-2">
-            <div>
-              <span className="font-medium">Status:</span> {loading ? 'Loading' : 'Ready'}
-            </div>
-            <div>
-              <span className="font-medium">Builds:</span> {builds.length}
-            </div>
-            <div>
-              <span className="font-medium">Error:</span> {error ? 'Yes' : 'No'}
-            </div>
-            <div>
-              <span className="font-medium">API URL:</span> {apiService ? 'Connected' : 'Disconnected'}
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // Function to handle file browse button click
   const handleBrowseClick = () => {
     fileInputRef.current?.click()
@@ -1310,8 +1354,8 @@ function Builds(): JSX.Element {
 
       // 성공 메시지 표시
       toast({
-        message: "Build list has been refreshed successfully",
-        type: "success"
+        description: "Build list has been refreshed successfully",
+        variant: "default"
       });
     } catch (error) {
       console.error('Manual refresh failed:', error);
@@ -1320,8 +1364,8 @@ function Builds(): JSX.Element {
       addDebugLog(`Manual refresh failed: ${errorMessage}`, 'error');
 
       toast({
-        message: `Refresh failed: ${errorMessage}`,
-        type: "error"
+        description: `Refresh failed: ${errorMessage}`,
+        variant: "destructive"
       });
     }
   };
@@ -1360,80 +1404,69 @@ function Builds(): JSX.Element {
   };
 
   return (
-    <div className="container mx-auto p-4">
-      {/* Debug Panel Toggle Button */}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={toggleDebugPanel}
-        className="fixed bottom-4 right-4 z-50 bg-white shadow-md h-8 text-xs px-3"
-      >
-        {showDebugPanel ? 'Hide Debug' : 'Show Debug'}
-      </Button>
-
-      {/* Debug Panel */}
-      <DebugPanel />
-
-      {/* Current view - either build list or version management */}
+    <div className="container mx-auto p-4 h-full flex flex-col">
+      {/* 버전 관리 화면 */}
       {showVersionManagement && selectedBuild ? (
-        <VersionManager
-          buildId={selectedBuild}
-          onBack={handleBackToBuildList}
-        />
+        <VersionManager buildId={selectedBuild} onBack={handleBackToBuildList} />
       ) : (
-        <div>
-          {/* Header with title and actions */}
-          <div className="flex justify-between items-center mb-4">
+        <>
+          <div className="flex justify-between items-center mb-6">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-xl font-semibold">Builds</h1>
-              </div>
-              <p className="text-xs text-gray-500">Manage and deploy game builds</p>
+              <h1 className="text-xl font-bold">Builds</h1>
+              <p className="text-xs text-gray-500">Manage your application builds</p>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex space-x-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleDebugPanel}
+                className="h-8 text-xs"
+              >
+                {showDebugPanel ? 'Hide Debug Panel' : 'Show Debug Panel'}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleRefresh}
+                className="h-8 text-xs"
                 disabled={loading}
-                className="ml-2 h-7 text-xs"
               >
-                {loading ? (
-                  <>
-                    <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
-                    Refreshing...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-1 h-3 w-3" />
+                <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
-                  </>
-                )}
               </Button>
               <Button
                 onClick={() => setShowAddBuildDialog(true)}
                 size="sm"
-                className="text-xs flex items-center gap-1 h-7 px-2 py-0"
+                className="h-8 text-xs"
               >
-                <Plus className="h-3 w-3" />
-                New Build
+                <Plus className="h-3 w-3 mr-1" />
+                Add Build
               </Button>
             </div>
           </div>
 
-          {/* Build List with onBuildSelect prop */}
-          <BuildsList
-            key={buildListKey}
-            onBuildSelect={handleBuildSelect}
-            onEditBuild={(build: Build) => {
-              setEditingBuild({...build});
-              setIsEditDialogOpen(true);
-            }}
-          />
-        </div>
+          <ScrollArea className="flex-1 overflow-auto h-[calc(100vh-12rem)]">
+            <Card className="w-full">
+              <CardContent className="p-0">
+                <BuildsList
+                  key={buildListKey}
+                  builds={builds}
+                  loading={loading}
+                  error={error}
+                  onBuildSelect={handleBuildSelect}
+                  onSelect={handleBuildSelect}
+                  onEdit={handleEditClick}
+                  onDelete={handleDeleteClick}
+                  serverStatus={serverStatus}
+                />
+              </CardContent>
+            </Card>
+          </ScrollArea>
+
+        </>
       )}
 
-      {/* Add Build Dialog */}
+      {/* Add Build Dialog - 빌드 추가 다이얼로그 */}
       <Dialog open={showAddBuildDialog} onOpenChange={(open) => {
         if (!open) resetFormState();
         setShowAddBuildDialog(open);
@@ -1559,8 +1592,8 @@ function Builds(): JSX.Element {
               />
             </div>
             <div className="grid grid-cols-4 items-start gap-3">
-              <Label className="text-right text-xs pt-2">
-                파일 업로드
+              <Label htmlFor="download_url" className="text-right text-xs pt-2">
+                Upload Setup File
               </Label>
               <div className="col-span-3">
                 <div
@@ -1572,34 +1605,37 @@ function Builds(): JSX.Element {
                   <UploadCloud className="mx-auto h-8 w-8 text-gray-400" />
                   <div className="mt-1">
                     <p className="text-xs text-gray-600">
-                      빌드 파일을 여기에 끌어다 놓거나 클릭하여 선택하세요
+                      Drag and drop a new setup file here or click to select
                     </p>
                     <p className="text-[10px] text-gray-500 mt-1">
-                      업로드는 S3에 저장되고 다운로드 URL이 저장됩니다
+                      {newBuild.download_url
+                        ? "Current URL: " + newBuild.download_url
+                        : "Files will be uploaded to S3 and a download URL will be generated automatically"}
                     </p>
-            </div>
-                <input
-                  ref={fileInputRef}
+                  </div>
+                  <input
+                    ref={fileInputRef}
                     type="file"
-                  className="hidden"
+                    className="hidden"
                     onChange={handleFileSelect}
+                    accept=".exe,.dmg,.apk,.zip,.app,.appx,.ipa,.msi"
                   />
-              </div>
+                </div>
 
-              {setupFile && (
+                {setupFile && (
                   <div className="mt-2 text-xs">
                     <p className="font-medium">{setupFile.name}</p>
-                    <p className="text-gray-500">크기: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                    {fileHash && <p className="text-gray-500 truncate">MD5: {fileHash}</p>}
+                    <p className="text-gray-500">Size: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                    {fileHash && <p className="text-gray-500 truncate">Hash: {fileHash}</p>}
                   </div>
                 )}
                 {formErrors.download_url && (
                   <div className="text-red-500 text-xs mt-0.5">
                     {formErrors.download_url}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
           </div>
           {submitError && (
             <Alert variant="destructive">
@@ -1762,42 +1798,61 @@ function Builds(): JSX.Element {
           )}
               </div>
 
-              <div className="grid grid-cols-4 items-center gap-3">
-                <Label htmlFor="edit-download_url" className="text-right text-xs">
-                  Download URL
+              <div className="grid grid-cols-4 items-start gap-3">
+                <Label htmlFor="edit-download_url" className="text-right text-xs pt-2">
+                  Upload Setup File
                 </Label>
-                <div className="col-span-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="edit-download_url"
-                      value={editingBuild.download_url || ''}
-                      onChange={(e) => handleEditInputChange('download_url', e.target.value)}
-                      placeholder="https://example.com/downloads/file.exe"
-                      className={`flex-1 h-7 text-xs ${editFormErrors.download_url ? 'border-red-500' : ''}`}
-                    />
-                    <div className="relative">
-                      <Button
-                        onClick={handleEditBrowseClick}
-                        variant="outline"
-                        type="button"
-                        title="Upload Executable File"
-                      >
-                        <FileText className="h-4 w-4" />
-            </Button>
-                      <input
-                        type="file"
-                        ref={editFileInputRef}
-                        style={{ display: 'none' }}
-                        onChange={handleEditFileSelect}
-                        accept=".exe,.dmg,.apk,.zip,.app,.appx,.ipa,.msi"
-                      />
+                <div className="col-span-3">
+                  <div
+                    onClick={handleEditBrowseClick}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        const file = e.dataTransfer.files[0];
+                        setEditSetupFile(file);
+
+                        // Update file size
+                        const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
+                        setEditingBuild({
+                          ...editingBuild!,
+                          size: parseFloat(fileSizeInMB)
+                        });
+
+                        addDebugLog(`File dropped: ${file.name} (${fileSizeInMB} MB)`, 'info');
+                      }
+                    }}
+                    className="border-2 border-dashed border-gray-300 rounded-md p-4 mt-1 text-center cursor-pointer hover:border-blue-500 transition-colors"
+                  >
+                    <UploadCloud className="mx-auto h-8 w-8 text-gray-400" />
+                    <div className="mt-1">
+                      <p className="text-xs text-gray-600">
+                        Drag and drop a new setup file here or click to select
+                      </p>
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        {editingBuild?.download_url
+                          ? "Current URL: " + editingBuild.download_url
+                          : "Files will be uploaded to S3 and a download URL will be generated automatically"}
+                      </p>
                     </div>
+                    <input
+                      ref={editFileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={handleEditFileSelect}
+                      accept=".exe,.dmg,.apk,.zip,.app,.appx,.ipa,.msi"
+                    />
                   </div>
+
                   {editSetupFile && (
-                    <div className="text-xs text-gray-500 flex items-center gap-2">
-                      <FileText className="h-3.5 w-3.5 text-blue-500" />
-                      <span>{editSetupFile.name} ({(editSetupFile.size / (1024 * 1024)).toFixed(2)} MB)</span>
-                      <span className="text-green-500 text-[10px]">Uploaded - Download URL generated</span>
+                    <div className="mt-2 text-xs">
+                      <p className="font-medium">{editSetupFile.name}</p>
+                      <p className="text-gray-500">Size: {(editSetupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                      <p className="text-green-500 text-[10px]">Will be uploaded when saved</p>
                     </div>
                   )}
                   {editFormErrors.download_url && (
@@ -1822,6 +1877,24 @@ function Builds(): JSX.Element {
                   <div className="col-span-3 col-start-2 text-red-500 text-xs mt-0.5">
                     {editFormErrors.build_path}
           </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-4 items-center gap-3">
+                <Label htmlFor="edit-download_url" className="text-right text-xs">
+                  Download URL
+                </Label>
+                <Input
+                  id="edit-download_url"
+                  value={editingBuild.download_url || ''}
+                  onChange={(e) => handleEditInputChange('download_url', e.target.value)}
+                  className={`col-span-3 h-7 text-xs ${editFormErrors.download_url ? 'border-red-500' : ''}`}
+
+                />
+                {editFormErrors.download_url && (
+                  <div className="col-span-3 col-start-2 text-red-500 text-xs mt-0.5">
+                    {editFormErrors.download_url}
+                  </div>
                 )}
               </div>
             </div>

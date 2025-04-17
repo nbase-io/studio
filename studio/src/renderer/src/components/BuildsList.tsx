@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Download, Trash2, MoreHorizontal, Copy, Edit, Smartphone, Monitor, Tv, Apple, Globe, Gamepad } from 'lucide-react'
 import { apiService, Build } from '@/lib/api'
 
-// 플랫폼에 따른 아이콘 반환 함수
+// Function to return icon based on platform
 const getPlatformIcon = (platform?: string) => {
   switch (platform?.toLowerCase()) {
     case 'android':
@@ -28,7 +28,7 @@ const getPlatformIcon = (platform?: string) => {
   }
 };
 
-// 첫 글자만 대문자로 변환하는 함수
+// Function to capitalize first letter
 const capitalizeFirstLetter = (str?: string) => {
   if (!str) return '';
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
@@ -51,7 +51,7 @@ function BuildsList({ onBuildSelect, onEditBuild }: BuildsListProps): JSX.Elemen
     setError(null)
 
     try {
-      // 서버에서 빌드 가져오기
+      // Fetch builds from server
       const data = await apiService.getBuilds()
       setBuilds(data)
     } catch (err) {
@@ -67,13 +67,13 @@ function BuildsList({ onBuildSelect, onEditBuild }: BuildsListProps): JSX.Elemen
   }, [])
 
   const handleDeleteClick = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation() // 이벤트 버블링 방지
+    e.stopPropagation() // Prevent event bubbling
     setBuildToDelete(id)
     setShowDeleteDialog(true)
   }
 
   const handleEditClick = (build: Build, e: React.MouseEvent) => {
-    e.stopPropagation() // 이벤트 버블링 방지
+    e.stopPropagation() // Prevent event bubbling
     if (onEditBuild) {
       onEditBuild(build)
     }
@@ -112,7 +112,7 @@ function BuildsList({ onBuildSelect, onEditBuild }: BuildsListProps): JSX.Elemen
   }
 
   const handleDownload = (e: React.MouseEvent, downloadUrl?: string) => {
-    e.stopPropagation() // 이벤트 버블링 방지
+    e.stopPropagation() // Prevent event bubbling
     if (downloadUrl) {
       window.open(downloadUrl, '_blank')
     } else {
@@ -123,9 +123,10 @@ function BuildsList({ onBuildSelect, onEditBuild }: BuildsListProps): JSX.Elemen
   const handleBuildClick = (buildId?: string) => {
     if (buildId && onBuildSelect) {
       onBuildSelect(buildId)
+    } else {
+      alert('Build ID is not available for this build')
     }
   }
-
   return (
     <div className="w-full p-4">
       {loading ? (
@@ -142,7 +143,7 @@ function BuildsList({ onBuildSelect, onEditBuild }: BuildsListProps): JSX.Elemen
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {builds.map((build, index) => (
+          {builds.map((build) => (
             <Card
               key={build.id}
               className="bg-white text-gray-800 border border-gray-200 overflow-hidden rounded-md hover:bg-gray-50 transition-colors shadow-md"
@@ -153,7 +154,7 @@ function BuildsList({ onBuildSelect, onEditBuild }: BuildsListProps): JSX.Elemen
                     className="font-semibold text-gray-900 text-md cursor-pointer hover:text-blue-600"
                     onClick={() => handleBuildClick(build.id)}
                   >
-                    {index + 1}. {build.name}
+                    {build.name}
                   </h3>
                   <div className="flex space-x-1">
                     <Button

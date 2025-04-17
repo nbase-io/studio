@@ -67,6 +67,8 @@ export interface Version {
   files?: VersionFiles;
 }
 
+import { showGlobalError } from '../components/ErrorDialog';
+
 /**
  * API service for handling build-related operations
  */
@@ -280,8 +282,7 @@ export class ApiService {
 
       // 아니면 응답이 예상된 구조인지 확인
       if (!response || !response.data || !Array.isArray(response.data)) {
-        console.error('API response is not in expected format:', response);
-        // 잘못된 형식이면 빈 배열 반환
+
         return [];
       }
 
@@ -383,21 +384,7 @@ export class ApiService {
       return newBuild as Build;
     } catch (error) {
       console.warn('Failed to create build on server. Creating virtual build on client.', error);
-
-      // Virtual ID creation (for testing) if server connection fails
-      const mockBuild: Build = {
-        ...buildData,
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      // Store in local storage (for testing)
-      const storedBuilds = JSON.parse(localStorage.getItem('mock_builds') || '[]');
-      storedBuilds.push(mockBuild);
-      localStorage.setItem('mock_builds', JSON.stringify(storedBuilds));
-
-      return mockBuild;
+      throw error;
     }
   }
 
@@ -495,14 +482,14 @@ export class ApiService {
   /**
    * Get versions for a build
    */
-  async getVersions(buildId: string, page: number = 1, limit: number = 10): Promise<{ totalCount: number; data: Version[] }> {
+  async getVersions(buildId: string, page: number = 1, limit: number = 10): Promise<{ totalCount: number; versions: Version[] }> {
     try {
       const timestamp = new Date().getTime();
       const response = await this.request<{ totalCount: number; data: Version[] }>(`builds/${buildId}/versions?page=${page}&limit=${limit}&_t=${timestamp}`);
 
-      if (!response || !response.data || !Array.isArray(response.data)) {
+      if (!response || !response.data) {
         console.error('API response is not in expected format:', response);
-        return { totalCount: 0, data: [] };
+        return { totalCount: 0, versions: [] };
       }
 
       // Apply CDN URL to download URLs
@@ -513,8 +500,8 @@ export class ApiService {
           }
 
           // Also apply to files if they exist
-          if (version.files && Array.isArray(version.files)) {
-            version.files.forEach(file => {
+          if (version.files && Array.isArray(version.files.files)) {
+            version.files.files.forEach(file => {
               if (file.download_url && !file.download_url.startsWith('http')) {
                 file.download_url = `${this.cdnUrl}/${file.download_url.replace(/^\//, '')}`;
               }
@@ -524,12 +511,12 @@ export class ApiService {
       }
 
       console.log(`Successfully fetched ${response.data.length} versions for build ${buildId}`);
-      return response;
+      return { totalCount: response.totalCount, versions: response.data };
     } catch (error) {
       console.error(`Error in getVersions for build ${buildId}:`, error);
 
       // Return empty data on error
-      return { totalCount: 0, data: [] };
+      return { totalCount: 0, versions: [] };
     }
   }
 
@@ -580,16 +567,17 @@ export class ApiService {
         throw new Error(`Failed to create version: ${response}`);
       }
 
-      const version = response;
+      const version = response.data;
 
       // Apply CDN URL to download URLs
-      if (this.cdnUrl && version.download_url && !version.download_url.startsWith('http')) {
+      if (this.cdnUrl && version?.download_url && !version?.download_url.startsWith('http')) {
         version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
       }
 
       return version;
     } catch (error) {
       console.error('Failed to create version:', error);
+      showGlobalError('버전 생성 실패', '새 버전을 생성하는데 실패했습니다.');
       throw error;
     }
   }
@@ -640,18 +628,21 @@ export class ApiService {
       const response = await this.request<{ data: VersionFile }>(`builds/${buildId}/versions/${versionId}/files`, 'POST', fileData);
 
       if (!response) {
+        console.error('Failed to add file to version');
+        showGlobalError('파일 추가 실패', '버전에 파일을 추가하는데 실패했습니다.');
         throw new Error('Failed to add file to version');
       }
 
-      const file = response;
+      const file = response.data;
       // Apply CDN URL to download URL
-      if (this.cdnUrl && file.download_url && !file.download_url.startsWith('http')) {
+      if (this.cdnUrl && file?.download_url && !file?.download_url.startsWith('http')) {
         file.download_url = `${this.cdnUrl}/${file.download_url.replace(/^\//, '')}`;
       }
 
       return file;
     } catch (error) {
       console.error(`Failed to add file to version ${versionId} for build ${buildId}:`, error);
+      showGlobalError('파일 추가 실패', `버전에 파일을 추가하는데 실패했습니다: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }

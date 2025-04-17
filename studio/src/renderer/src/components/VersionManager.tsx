@@ -41,6 +41,7 @@ import AddVersionDialog from './AddVersionDialog';
 import EditVersionDialog from './EditVersionDialog';
 import DeleteVersionDialog from './DeleteVersionDialog';
 import ViewFilesDialog from './ViewFilesDialog';
+import { isError } from 'util'
 
 interface VersionManagerProps {
   buildId: string;
@@ -170,8 +171,8 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
   // 버전 목록 로드 함수
   const loadVersions = async () => {
     try {
-      const response = await apiService.getVersions(buildId, page, limit)
-      setVersions(response.data)
+      const response = await apiService.getVersions(buildId, page, limit);
+      setVersions(response.versions)
       setTotalCount(response.totalCount)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err)
@@ -654,7 +655,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
 
       // API에서 설정 못 가져왔다면 localStorage 확인
       if (!s3Config) {
-        const localSettings = localStorage.getItem('s3Settings');
+        const localSettings = localStorage.getItem('settings');
         if (localSettings) {
           try {
             s3Config = JSON.parse(localSettings);
@@ -734,7 +735,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       const fileNameWithoutExt = originalName.includes('.') ?
         originalName.substring(0, originalName.lastIndexOf('.')) : originalName;
 
-      // 새 파일 이름 생성 (xxxx_파일명.확장자)
+      // 새 파일 이름 생성 (xxxx파일명.확장자)
       const newFileName = `${randomPrefix}_${fileNameWithoutExt}${fileExtension}`;
       const key = `versions/${versionId}/${newFileName}`;
 
@@ -1278,10 +1279,15 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
                 filePath: fileData.relativePath,
               });
 
-              success = true;
-              fileData.registered = true;
-              console.log(`파일 정보가 API 서버에 성공적으로 저장되었습니다 (${i+1}/${uploadedFileData.length}): ${fileData.name}`);
+              if(!result?.message) {
+                success = true;
+                fileData.registered = true;
+                console.log(`파일 정보가 API 서버에 성공적으로 저장되었습니다 (${i+1}/${uploadedFileData.length}): ${fileData.name}`);
+              } else {
+
+              }
             } catch (error) {
+
               lastError = error;
               retryCount++;
 
@@ -1427,18 +1433,18 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
             <Table>
               <TableHeader>
                 <TableRow className="h-8">
-                  <TableHead className="py-1 px-2 text-[8px]">Status</TableHead>
-                  <TableHead className="py-1 px-2 text-[8px]">Version</TableHead>
-                  <TableHead className="py-1 px-2 text-[8px]">Change Log</TableHead>
-                  <TableHead className="py-1 px-2 text-[8px]">Files</TableHead>
-                  <TableHead className="py-1 px-2 text-[8px]">Created</TableHead>
-                  <TableHead className="text-right py-1 px-2 text-[8px]">Action</TableHead>
+                  <TableHead className="py-1 px-2 text-[6px]">Status</TableHead>
+                  <TableHead className="py-1 px-2 text-[6px]">Version</TableHead>
+                  <TableHead className="py-1 px-2 text-[6px]">Change Log</TableHead>
+                  <TableHead className="py-1 px-2 text-[6px]">Files</TableHead>
+                  <TableHead className="py-1 px-2 text-[6px]">Created</TableHead>
+                  <TableHead className="text-right py-1 px-2 text-[6px]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {versions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center h-24 text-[9px] text-gray-500">
+                    <TableCell colSpan={6} className="text-center h-24 text-[7px] text-gray-500">
                       No versions available
                     </TableCell>
                   </TableRow>
@@ -1450,26 +1456,26 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
                           variant={version.status === 'published' ? 'default' :
                                  version.status === 'draft' ? 'secondary' :
                                  version.status === 'archived' ? 'outline' : 'destructive'}
-                          className="px-2 text-[8px]"
+                          className="px-2 text-[6px]"
                         >
                           {version.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium text-[9px] py-1 px-2">{version.versionCode}</TableCell>
-                      <TableCell className="text-[9px] truncate max-w-[300px] py-1 px-2">
+                      <TableCell className="font-medium text-[7px] py-1 px-2">{version.versionCode}</TableCell>
+                      <TableCell className="text-[7px] truncate max-w-[300px] py-1 px-2">
                         {version.changeLog || '-'}
                       </TableCell>
-                      <TableCell className="text-[9px] py-1 px-2">
+                      <TableCell className="text-[7px] py-1 px-2">
                         <Button
                           variant="link"
-                          className="p-0 h-auto text-[9px]"
+                          className="p-0 h-auto text-[7px]"
                           onClick={() => handleViewFiles(version)}
                         >
-                          {version.files?.totalCount || 0} 파일
+                          {version.files?.length || 0} files
                           {version.files?.totalSize ? ` (${formatFileSize(version.files.totalSize)})` : ''}
                         </Button>
                       </TableCell>
-                      <TableCell className="text-[8px] py-1 px-2">
+                      <TableCell className="text-[6px] py-1 px-2">
                         {version.createdAt ? new Date(version.createdAt).toLocaleDateString() : '-'}
                       </TableCell>
                       <TableCell className="text-right">
@@ -1504,7 +1510,44 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
                             disabled={!version.download_url}
                             onClick={() => {
                               if (version.download_url) {
-                                window.open(version.download_url, '_blank')
+                                console.log('다운로드 URL:', version.download_url);
+
+                                // URL이 상대 경로인지 확인하고 cdnUrl 추가
+                                let fullUrl = version.download_url;
+                                if (!fullUrl.startsWith('http')) {
+                                  // 설정에서 cdnUrl 가져오기
+                                  const settings = JSON.parse(localStorage.getItem('settings') || '{}');
+                                  const cdnUrl = settings.cdnUrl || '';
+                                  if (cdnUrl) {
+                                    fullUrl = `${cdnUrl.replace(/\/$/, '')}/${version.download_url.replace(/^\//, '')}`;
+                                  }
+                                }
+
+                                console.log('최종 다운로드 URL:', fullUrl);
+
+                                // 파일 다운로드를 위한 임시 링크 요소 생성
+                                const link = document.createElement('a');
+                                link.href = fullUrl;
+                                link.target = '_blank';
+                                link.download = `${version.versionCode || 'download'}`; // 파일명 지정
+
+                                // 요소를 DOM에 추가하고 클릭 이벤트 발생시킨 후 제거
+                                document.body.appendChild(link);
+                                link.click();
+                                setTimeout(() => {
+                                  document.body.removeChild(link);
+                                }, 100);
+
+                                toast({
+                                  title: '다운로드 시작',
+                                  description: '파일 다운로드가 시작되었습니다.',
+                                });
+                              } else {
+                                toast({
+                                  title: '다운로드 불가',
+                                  description: '다운로드 URL이 설정되지 않았습니다.',
+                                  variant: 'destructive'
+                                });
                               }
                             }}
                           >

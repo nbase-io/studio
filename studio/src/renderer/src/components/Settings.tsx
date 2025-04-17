@@ -38,7 +38,8 @@ function Settings(): JSX.Element {
     projectId: '',
     apiKey: '',
     serverUrl: 'http://localhost:4000',
-    cdnUrl: ''
+    cdnUrl: '',
+    endpointUrl: ''
   })
 
   const [loading, setLoading] = useState(false)
@@ -61,7 +62,8 @@ function Settings(): JSX.Element {
         projectId: globalSettings.projectId || '',
         apiKey: globalSettings.apiKey || '',
         serverUrl: globalSettings.serverUrl || 'http://localhost:4000',
-        cdnUrl: globalSettings.cdnUrl || ''
+        cdnUrl: globalSettings.cdnUrl || '',
+        endpointUrl: globalSettings.endpointUrl || ''
       });
     }
   }, [globalSettings, globalLoading]);
@@ -249,154 +251,165 @@ function Settings(): JSX.Element {
   };
 
   return (
-    <div className="container mx-auto p-4 text-xs">
+    <div className="container mx-auto p-4 text-xs h-full">
       <h1 className="text-xl font-bold mb-2">Settings</h1>
       <p className="text-xs text-gray-500 mb-4">Configure your GamePot studio settings</p>
 
-      <div className="flex flex-col space-y-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">API Configuration</CardTitle>
-            <CardDescription className="text-xs">Configure API access for build management.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="projectId" className="text-xs">Project ID</Label>
-                <Input
-                  id="projectId"
-                  value={settings.projectId}
-                  onChange={(e) => handleInputChange('projectId', e.target.value)}
-                  placeholder="your-project-id"
-                  className="h-8 text-xs"
-                />
-              </div>
+      <ScrollArea className="h-[calc(100vh-8rem)]">
+        <div className="flex flex-col space-y-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">API Configuration</CardTitle>
+              <CardDescription className="text-xs">Configure API access for build management.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="projectId" className="text-xs">Project ID</Label>
+                  <Input
+                    id="projectId"
+                    value={settings.projectId}
+                    onChange={(e) => handleInputChange('projectId', e.target.value)}
+                    placeholder="your-project-id"
+                    className="h-8 text-xs"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="apiKey" className="text-xs">API Key</Label>
-                <Input
-                  id="apiKey"
-                  type="password"
-                  value={settings.apiKey}
-                  onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                  placeholder="your-api-key"
-                  className="h-8 text-xs"
-                />
-              </div>
+                <div className="space-y-1">
+                  <Label htmlFor="apiKey" className="text-xs">API Key</Label>
+                  <Input
+                    id="apiKey"
+                    type="password"
+                    value={settings.apiKey}
+                    onChange={(e) => handleInputChange('apiKey', e.target.value)}
+                    placeholder="your-api-key"
+                    className="h-8 text-xs"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="serverUrl" className="text-xs">Server URL</Label>
-                <Input
-                  id="serverUrl"
-                  value={settings.serverUrl}
-                  onChange={(e) => handleInputChange('serverUrl', e.target.value)}
-                  placeholder="http://localhost:4000"
-                  className="h-8 text-xs"
-                />
-              </div>
+                <div className="space-y-1">
+                  <Label htmlFor="serverUrl" className="text-xs">Server URL</Label>
+                  <Input
+                    id="serverUrl"
+                    value={settings.serverUrl}
+                    onChange={(e) => handleInputChange('serverUrl', e.target.value)}
+                    placeholder="http://localhost:4000"
+                    className="h-8 text-xs"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="cdnUrl" className="text-xs">CDN URL</Label>
-                <Input
-                  id="cdnUrl"
-                  value={settings.cdnUrl}
-                  onChange={(e) => handleInputChange('cdnUrl', e.target.value)}
-                  placeholder="https://cdn.yourdomain.com"
-                  className="h-8 text-xs"
-                />
+                <div className="space-y-1">
+                  <Label htmlFor="cdnUrl" className="text-xs">CDN URL</Label>
+                  <Input
+                    id="cdnUrl"
+                    value={settings.cdnUrl}
+                    onChange={(e) => handleInputChange('cdnUrl', e.target.value)}
+                    placeholder="https://cdn.yourdomain.com"
+                    className="h-8 text-xs"
+                  />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">AWS S3 Configuration</CardTitle>
-            <CardDescription className="text-xs">Configure credentials to access S3 buckets.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="accessKey" className="text-xs">Access Key ID</Label>
-                <Input
-                  id="accessKey"
-                  value={settings.accessKey}
-                  onChange={(e) => handleInputChange('accessKey', e.target.value)}
-                  placeholder="AKIAIOSFODNN7EXAMPLE"
-                  className="h-8 text-xs"
-                />
-              </div>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">S3 Configuration</CardTitle>
+              <CardDescription className="text-xs">Configure credentials to access S3 buckets.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="accessKey" className="text-xs">Access Key ID</Label>
+                  <Input
+                    id="accessKey"
+                    value={settings.accessKey}
+                    onChange={(e) => handleInputChange('accessKey', e.target.value)}
+                    placeholder="AKIAIOSFODNN7EXAMPLE"
+                    className="h-8 text-xs"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="secretKey" className="text-xs">Secret Access Key</Label>
-                <Input
-                  id="secretKey"
-                  type="password"
-                  value={settings.secretKey}
-                  onChange={(e) => handleInputChange('secretKey', e.target.value)}
-                  placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-                  className="h-8 text-xs"
-                />
-              </div>
+                <div className="space-y-1">
+                  <Label htmlFor="secretKey" className="text-xs">Secret Access Key</Label>
+                  <Input
+                    id="secretKey"
+                    type="password"
+                    value={settings.secretKey}
+                    onChange={(e) => handleInputChange('secretKey', e.target.value)}
+                    placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                    className="h-8 text-xs"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="region" className="text-xs">Region</Label>
-                <Input
-                  id="region"
-                  value={settings.region}
-                  onChange={(e) => handleInputChange('region', e.target.value)}
-                  placeholder="ap-northeast-2"
-                  className="h-8 text-xs"
-                />
-              </div>
+                <div className="space-y-1">
+                  <Label htmlFor="region" className="text-xs">Region</Label>
+                  <Input
+                    id="region"
+                    value={settings.region}
+                    onChange={(e) => handleInputChange('region', e.target.value)}
+                    placeholder="ap-northeast-2"
+                    className="h-8 text-xs"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="s3Bucket" className="text-xs">Bucket Name</Label>
-                <Input
-                  id="s3Bucket"
-                  value={settings.s3Bucket}
-                  onChange={(e) => handleInputChange('s3Bucket', e.target.value)}
-                  placeholder="my-game-launcher-bucket"
-                  className="h-8 text-xs"
-                />
+                <div className="space-y-1">
+                  <Label htmlFor="s3Bucket" className="text-xs">Bucket Name</Label>
+                  <Input
+                    id="s3Bucket"
+                    value={settings.s3Bucket}
+                    onChange={(e) => handleInputChange('s3Bucket', e.target.value)}
+                    placeholder="my-game-launcher-bucket"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="endpointUrl" className="text-xs">Endpoint URL (Optional)</Label>
+                  <Input
+                    id="endpointUrl"
+                    value={settings.endpointUrl}
+                    onChange={(e) => handleInputChange('endpointUrl', e.target.value)}
+                    placeholder="https://s3.ap-northeast-2.amazonaws.com"
+                    className="h-8 text-xs"
+                  />
+                </div>
               </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-wrap gap-2">
+            </CardContent>
+            <CardFooter className="flex flex-wrap gap-2">
+              <Button
+                onClick={testS3Connection}
+                variant="outline"
+                className="flex-1 h-8 text-xs"
+                disabled={testingConnection || !settings.s3Bucket}
+              >
+                {testingConnection && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                Test S3 Connection
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <div className="flex justify-end space-x-3 mt-4">
             <Button
-              onClick={testS3Connection}
-              variant="outline"
-              className="flex-1 h-8 text-xs"
-              disabled={testingConnection || !settings.s3Bucket}
+              onClick={saveSettings}
+              className="h-10 px-6"
+              disabled={loading}
+              size="default"
             >
-              {testingConnection && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-              Test S3 Connection
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  저장 중...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Save
+                </>
+              )}
             </Button>
-          </CardFooter>
-        </Card>
-
-        {/* 저장 버튼 영역 (카드 밖으로 이동) */}
-        <div className="mt-4 flex justify-end">
-          <Button
-            onClick={saveSettings}
-            className="h-10 px-6"
-            disabled={loading}
-            size="default"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                저장 중...
-              </>
-            ) : (
-              <>
-                <Save className="mr-2 h-4 w-4" />
-                Save
-              </>
-            )}
-          </Button>
+          </div>
         </div>
-      </div>
+      </ScrollArea>
 
       {/* S3 연결 테스트 결과 다이얼로그 */}
       <Dialog open={showResultDialog} onOpenChange={setShowResultDialog}>
