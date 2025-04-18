@@ -8,6 +8,7 @@ interface Window {
     loadSettings: () => Promise<Record<string, unknown>>;
     saveSettings: (settings: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
     getAppVersion: () => Promise<{ version: string }>;
+    quitApp: () => void;
     getS3Config: () => Promise<any>;
     listS3Files: (params: { bucket: string; prefix?: string }) => Promise<any>;
     uploadFileToS3: (params: any) => Promise<any>;

@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, session, protocol } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.icns?asset'
@@ -8,16 +8,19 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } fro
 import { tmpdir } from 'os'
 import { autoUpdater } from 'electron-updater'
 
-// 환경설정 파일 경로
+// 메인 윈도우 참조 저장을 위한 전역 변수
+let win: BrowserWindow | null = null
+
+// Settings file path
 const settingsFilePath = join(app.getPath('userData'), 'settings.dat')
 
-// 윈도우 설정 파일 경로
+// Window settings file path
 const windowSettingsFilePath = join(app.getPath('userData'), 'window-settings.json')
 
-// 암호화 키 (실제 앱에서는 더 안전한 방법으로 관리해야 합니다)
+// Encryption key (should be managed more securely in production)
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-76f3MHFDIul7xdwIfbWYKuLuVHovNY8G'
 
-// 임시 파일 디렉토리 - 애플리케이션별 임시 디렉토리 생성
+// Temporary file directory - Create application-specific temp directory
 const appTempDir = join(tmpdir(), `gamepot-studio-${Date.now()}`);
 
 // Auto updater configuration
@@ -27,14 +30,17 @@ if (!is.dev) {
   autoUpdater.autoDownload = false;
 }
 
-// 단일 인스턴스 적용
+// Splash window reference
+let splashWindow: BrowserWindow | null = null;
+
+// Apply single instance lock
 const gotTheLock = app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   app.quit()
 } else {
   app.on('second-instance', (_) => {
-    // 두 번째 인스턴스가 실행되면 첫 번째 인스턴스의 창을 활성화
+    // When a second instance is launched, activate the first instance window
     const windows = BrowserWindow.getAllWindows()
     if (windows.length) {
       const mainWindow = windows[0]
@@ -44,19 +50,47 @@ if (!gotTheLock) {
   })
 }
 
-// 미리 생성된 키 (성능 향상을 위해 전역으로 한 번만 생성)
+// Pre-generated key (created once globally for performance)
 const ENCRYPTION_KEY_BUFFER = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
 
-// 윈도우 설정을 저장하는 함수
+// Create splash window function
+function createSplashWindow(): BrowserWindow {
+  const splash = new BrowserWindow({
+    width: 800,
+    height: 600,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+
+  splash.loadFile(join(__dirname, '../../resources/images/splash.html'));
+
+  // Handle cancel event to exit app
+  ipcMain.once('cancel-splash', () => {
+    console.log('Splash screen canceled, exiting application.');
+    app.exit(0);
+  });
+
+  return splash;
+}
+
+// Function to save window settings
 function saveWindowSettings(window: BrowserWindow): void {
   try {
-    // 현재 창 상태 가져오기
+    // Get current window state
     const { width, height, x, y } = window.getBounds() as { width: number; height: number; x: number; y: number };
 
-    // 최대화 상태 확인
+    // Check maximized state
     const maximized = window.isMaximized();
 
-    // 윈도우 설정 객체 생성
+    // Create window settings object
     const windowSettings = {
       width,
       height,
@@ -65,29 +99,29 @@ function saveWindowSettings(window: BrowserWindow): void {
       maximized
     };
 
-    // JSON으로 변환하여 파일에 저장
+    // Convert to JSON and save to file
     fs.writeFileSync(windowSettingsFilePath, JSON.stringify(windowSettings));
-    console.log('윈도우 설정 저장됨:', windowSettings);
+    console.log('Window settings saved:', windowSettings);
   } catch (error) {
-    console.error('윈도우 설정 저장 중 오류:', error);
+    console.error('Error saving window settings:', error);
   }
 }
 
-// 윈도우 설정을 로드하는 함수
+// Function to load window settings
 function loadWindowSettings(): { width: number; height: number; x?: number; y?: number; maximized?: boolean } {
   try {
-    // 설정 파일이 존재하는지 확인
+    // Check if settings file exists
     if (fs.existsSync(windowSettingsFilePath)) {
-      // 파일에서 설정 로드
+      // Load settings from file
       const settings = JSON.parse(fs.readFileSync(windowSettingsFilePath, 'utf-8'));
-      console.log('윈도우 설정 로드됨:', settings);
+      console.log('Window settings loaded:', settings);
       return settings;
     }
   } catch (error) {
-    console.error('윈도우 설정 로드 중 오류:', error);
+    console.error('Error loading window settings:', error);
   }
 
-  // 기본 설정 반환
+  // Return default settings
   return {
     width: 1600,
     height: 900
@@ -163,7 +197,10 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 }
 
 function createWindow(): void {
-  // 이전 윈도우 설정 로드
+  // Splash window creation disabled
+  // splashWindow = createSplashWindow();
+
+  // Load previous window settings
   const windowSettings = loadWindowSettings();
 
   // Create the browser window.
@@ -179,7 +216,7 @@ function createWindow(): void {
     // maxWidth: 1600,
     // maxHeight: 1000,
     title: 'GamePot Studio',
-    icon, // 모든 플랫폼에 아이콘 적용
+    icon, // Apply icon to all platforms
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -191,44 +228,47 @@ function createWindow(): void {
     }
   })
 
-  // 자동 업데이트 설정
+  // 전역 win 변수에 메인 윈도우 할당
+  win = mainWindow;
+
+  // Setup auto-updater
   setupAutoUpdater(mainWindow);
 
-  // 윈도우가 최대화된 상태로 저장되었으면 최대화
+  // Maximize if window was saved in maximized state
   if (windowSettings.maximized) {
     mainWindow.maximize();
   }
 
-  // 윈도우 크기 변경 이벤트 처리
+  // Window resize event handler
   mainWindow.on('resize', () => {
     if (!mainWindow.isMaximized()) {
       saveWindowSettings(mainWindow);
     }
   });
 
-  // 윈도우 위치 변경 이벤트 처리
+  // Window move event handler
   mainWindow.on('move', () => {
     if (!mainWindow.isMaximized()) {
       saveWindowSettings(mainWindow);
     }
   });
 
-  // 윈도우 최대화 이벤트 처리
+  // Window maximize event handler
   mainWindow.on('maximize', () => {
     saveWindowSettings(mainWindow);
   });
 
-  // 윈도우 최대화 해제 이벤트 처리
+  // Window unmaximize event handler
   mainWindow.on('unmaximize', () => {
     saveWindowSettings(mainWindow);
   });
 
-  // 윈도우 닫기 이벤트 처리
+  // Window close event handler
   mainWindow.on('close', () => {
     saveWindowSettings(mainWindow);
   });
 
-  // 전역 CSP 설정 (모든 창에 적용)
+  // Global CSP settings (applied to all windows)
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -240,7 +280,7 @@ function createWindow(): void {
     });
   });
 
-  // CSP 설정 2: 실행 시 CSP 메타 태그 삽입
+  // CSP settings 2: Insert CSP meta tag on execution
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.executeJavaScript(`
       const meta = document.createElement('meta');
@@ -251,9 +291,11 @@ function createWindow(): void {
   });
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
-    // 개발자 도구 자동 실행
-    mainWindow.webContents.openDevTools()
+    // Show main window directly without splash screen
+    mainWindow.show();
+
+    // Auto open developer tools
+    mainWindow.webContents.openDevTools();
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -261,7 +303,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // CSP 설정 3: CORS 허용
+  // CSP settings 3: Allow CORS
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
     callback({
       requestHeaders: {
@@ -281,33 +323,33 @@ function createWindow(): void {
   }
 }
 
-// 설정 저장 핸들러
+// Settings save handler
 ipcMain.handle('save-settings', async (_, settings: string) => {
   try {
-    // 파라미터 검증 추가
+    // Parameter validation
     if (!settings || typeof settings !== 'string') {
-      throw new Error('유효하지 않은 설정 데이터입니다');
+      throw new Error('Invalid settings data');
     }
 
-    // 객체를 JSON 문자열로 변환
+    // Convert object to JSON string
     const settingsJson = JSON.stringify(settings);
 
-    // 디버그 로그 추가
-    console.log('저장할 설정 데이터:', settingsJson.substring(0, 50) + '...');
+    // Add debug log
+    console.log('Settings data to save:', settingsJson.substring(0, 50) + '...');
 
-    // 추가 암호화 적용
+    // Apply additional encryption
     const encryptedSettings = encrypt(settingsJson);
 
-    // 파일이 저장될 디렉토리 확인 및 생성
+    // Check and create directory for file
     const settingsDir = join(app.getPath('userData'));
     if (!fs.existsSync(settingsDir)) {
       fs.mkdirSync(settingsDir, { recursive: true });
     }
 
-    // 설정 파일 저장
+    // Save settings file
     fs.writeFileSync(settingsFilePath, encryptedSettings);
 
-    console.log('설정 저장 완료:', settingsFilePath);
+    console.log('Settings saved successfully:', settingsFilePath);
     return { success: true };
   } catch (error: any) {
     console.error('Error saving settings:', error);
@@ -315,25 +357,40 @@ ipcMain.handle('save-settings', async (_, settings: string) => {
   }
 });
 
-// 설정 로드 핸들러
+// Settings load handler
 ipcMain.handle('load-settings', async () => {
   try {
     if (fs.existsSync(settingsFilePath)) {
-      const encryptedSettings = fs.readFileSync(settingsFilePath, 'utf-8');
-
-      // 설정 파일이 비어있는지 확인
-      if (!encryptedSettings || encryptedSettings.trim() === '') {
-        return null;
-      }
-
-      // 복호화 적용
-      const decryptedData = decrypt(encryptedSettings);
-
-      // 복호화된 데이터가 유효한 JSON인지 확인
       try {
-        return JSON.parse(decryptedData);
-      } catch (jsonError) {
-        console.error('설정 데이터 파싱 오류:', jsonError);
+        const encryptedSettings = fs.readFileSync(settingsFilePath, 'utf-8');
+
+        // Check if settings file is empty
+        if (!encryptedSettings || encryptedSettings.trim() === '') {
+          return null;
+        }
+
+        // Apply decryption
+        const decryptedData = decrypt(encryptedSettings);
+
+        // Check if decrypted data is valid JSON
+        try {
+          return JSON.parse(decryptedData);
+        } catch (jsonError) {
+          console.error('Error parsing settings data:', jsonError);
+          // 손상된 설정 파일 백업 및 삭제
+          const backupPath = `${settingsFilePath}.corrupted.${Date.now()}`;
+          fs.copyFileSync(settingsFilePath, backupPath);
+          fs.unlinkSync(settingsFilePath);
+          console.log(`Corrupted settings file backed up to ${backupPath} and removed`);
+          return null;
+        }
+      } catch (decryptError) {
+        console.error('Failed to decrypt settings:', decryptError);
+        // 복호화 실패한 설정 파일 백업 및 삭제
+        const backupPath = `${settingsFilePath}.backup.${Date.now()}`;
+        fs.copyFileSync(settingsFilePath, backupPath);
+        fs.unlinkSync(settingsFilePath);
+        console.log(`Backup created at ${backupPath} and original settings file removed`);
         return null;
       }
     }
@@ -344,15 +401,15 @@ ipcMain.handle('load-settings', async () => {
   }
 });
 
-// S3 설정 정보 가져오기 핸들러
+// S3 configuration info handler
 ipcMain.handle('get-s3-config', async () => {
   try {
-    // 설정 파일 존재 여부 확인
+    // Check if settings file exists
     if (fs.existsSync(settingsFilePath)) {
       const encryptedSettings = fs.readFileSync(settingsFilePath, 'utf-8')
       const settingsData = JSON.parse(decrypt(encryptedSettings))
 
-      // S3 관련 설정 반환
+      // Return S3 related settings
       return {
         bucket: settingsData.s3Bucket || 'my-default-bucket',
         region: settingsData.region || 'ap-northeast-2',
@@ -361,7 +418,7 @@ ipcMain.handle('get-s3-config', async () => {
       }
     }
 
-    // 설정 파일이 없으면 기본값 반환
+    // Check if settings file doesn't exist, return default values
     return {
       bucket: 'my-default-bucket',
       region: 'ap-northeast-2',
@@ -369,8 +426,8 @@ ipcMain.handle('get-s3-config', async () => {
       secretAccessKey: ''
     }
   } catch (error: any) {
-    console.error('S3 설정 가져오기 중 오류:', error)
-    // 오류 발생 시 기본값 반환
+    console.error('Error while getting S3 configuration:', error)
+    // Return default values when error occurs
     return {
       bucket: 'my-default-bucket',
       region: 'ap-northeast-2',
@@ -380,23 +437,23 @@ ipcMain.handle('get-s3-config', async () => {
   }
 })
 
-// S3 파일 목록 가져오기 핸들러
+// S3 file list handler
 ipcMain.handle('list-s3-files', async (_, { bucket, prefix }) => {
   try {
-    console.log(`S3 파일 목록 요청: ${bucket}/${prefix || ''}`);
+    console.log(`S3 file list request: ${bucket}/${prefix || ''}`);
 
-    // 설정에서 AWS 자격 증명 불러오기
+    // Load AWS credentials from settings
     const encryptedSettings = fs.existsSync(settingsFilePath)
       ? fs.readFileSync(settingsFilePath, 'utf-8')
       : null
 
     if (!encryptedSettings) {
-      throw new Error('AWS 자격 증명을 찾을 수 없습니다. 먼저 환경 설정을 완료해주세요.')
+      throw new Error('AWS credentials not found. Please complete environment setup first.')
     }
 
     const settings = JSON.parse(decrypt(encryptedSettings))
 
-    // AWS SDK 임포트 및 S3 클라이언트 생성
+    // Import AWS SDK and create S3 client
     const { S3Client, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 
     const s3Client = new S3Client({
@@ -407,17 +464,17 @@ ipcMain.handle('list-s3-files', async (_, { bucket, prefix }) => {
       }
     });
 
-    // ListObjectsV2 명령 생성
+    // Create ListObjectsV2 command
     const command = new ListObjectsV2Command({
       Bucket: bucket,
       Prefix: prefix || '',
       Delimiter: '/'
     });
 
-    // S3 객체 목록 조회
+    // Query S3 object list
     const response = await s3Client.send(command);
 
-    // 파일과 폴더 목록 분리
+    // Separate files and folders
     const files = (response.Contents || [])
       .filter(item => !item.Key.endsWith('/') && item.Key !== prefix)
       .map(item => ({
@@ -426,23 +483,23 @@ ipcMain.handle('list-s3-files', async (_, { bucket, prefix }) => {
         lastModified: item.LastModified
       }));
 
-    // 폴더 목록 (접두사/폴더명 형식)
+    // Folder list (prefix/folder name format)
     const folders = (response.CommonPrefixes || [])
       .map(prefix => prefix.Prefix);
 
     return { files, folders };
   } catch (error: unknown) {
-    console.error('S3 파일 목록 가져오기 중 오류:', error);
-    // 오류 발생 시 빈 목록 반환
+    console.error('Error while getting S3 file list:', error);
+    // Return empty list when error occurs
     return {
       files: [],
       folders: [],
-      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
     };
   }
 })
 
-// 파일 선택 대화상자 핸들러
+// File selection dialog handler
 ipcMain.handle('select-file', async (event, options) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   if (!window) return []
@@ -460,81 +517,81 @@ ipcMain.handle('select-file', async (event, options) => {
   return filePaths
 })
 
-// 진행 중인 업로드 작업 관리 (취소를 위해)
+// Managing active upload tasks (for cancellation)
 const activeUploads = new Map();
 
-// 업로드 취소 핸들러
+// Upload cancellation handler
 ipcMain.handle('cancel-upload', async (event) => {
   try {
     const senderID = event.sender.id;
-    console.log(`업로드 취소 요청: sender ID ${senderID}`);
+    console.log(`Upload cancellation request: sender ID ${senderID}`);
 
     if (activeUploads.has(senderID)) {
       const uploads = activeUploads.get(senderID);
-      console.log(`취소할 업로드 수: ${uploads.length}`);
+      console.log(`Number of uploads to cancel: ${uploads.length}`);
 
-      // 모든 활성 업로드 중단
+      // Abort all active uploads
       for (const upload of uploads) {
         if (upload.abort && typeof upload.abort === 'function') {
-          console.log(`업로드 중단 중: ${upload.key}`);
+          console.log(`Aborting upload: ${upload.key}`);
           await upload.abort();
         }
       }
 
-      // 업로드 목록 초기화
+      // Reset upload list
       activeUploads.delete(senderID);
 
-      // 취소 완료 알림
+      // Notify cancellation complete
       event.sender.send('upload-cancelled', { success: true });
 
       return { success: true };
     } else {
-      console.log('취소할 활성 업로드가 없음');
-      return { success: true, message: '취소할 업로드가 없습니다' };
+      console.log('No active uploads to cancel');
+      return { success: true, message: 'No uploads to cancel' };
     }
   } catch (error) {
-    console.error('업로드 취소 중 오류:', error);
+    console.error('Error while cancelling upload:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
     };
   }
 });
 
-// S3 파일 업로드 핸들러
+// S3 file upload handler
 ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
-  // 진행 중인 업로드 객체 (취소를 위해 사용)
+  // Upload operation object (used for cancellation)
   let uploadOperation: { key: string; abort: () => Promise<boolean> } | null = null;
 
   try {
-    // 파라미터 형식 검증
+    // Parameter format validation
     if (!params || typeof params !== 'object') {
-      throw new Error('파라미터는 객체 형태로 전달되어야 합니다');
+      throw new Error('Parameters must be passed as an object');
     }
 
     const { filePath, bucket, key, accessKeyId, secretAccessKey, region } = params;
 
-    // 파라미터 검증
+    // Parameter validation
     if (!filePath || !bucket || !key) {
-      throw new Error('필수 파라미터가 누락되었습니다 (filePath, bucket, key)');
+      throw new Error('Required parameters are missing (filePath, bucket, key)');
     }
 
-    console.log(`S3 업로드 요청: ${filePath} -> ${bucket}/${key}`);
+    console.log(`S3 upload request: ${filePath} -> ${bucket}/${key}`);
 
-    // 파일 존재 여부 확인
+    // Check if file exists
     if (!fs.existsSync(filePath)) {
-      throw new Error(`파일이 존재하지 않습니다: ${filePath}`);
+      throw new Error(`File does not exist: ${filePath}`);
     }
 
-    // 파일 정보 가져오기
+    // Get file information
     const fileStats = fs.statSync(filePath);
-    console.log(`파일 크기: ${fileStats.size} 바이트`);
+    console.log(`File size: ${fileStats.size} bytes`);
 
-    // 파일 확장자 및 컨텐츠 타입 결정
+    // Determine file extension and content type
     const ext = filePath.split('.').pop()?.toLowerCase() || '';
-    let contentType = 'application/octet-stream'; // 기본값
+    let contentType = 'application/octet-stream'; // Default value
 
-    // 일반적인 파일 확장자에 따른 MIME 타입 설정
+    // Set MIME type based on common file extensions
     const mimeTypes: Record<string, string> = {
       'exe': 'application/octet-stream',
       'dmg': 'application/x-apple-diskimage',
@@ -550,35 +607,35 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
       contentType = mimeTypes[ext];
     }
 
-    // S3 클라이언트 생성
+    // Create S3 client
     const s3Client = new S3Client({
       region: region || 'ap-northeast-2',
       credentials: {
         accessKeyId: accessKeyId || '',
         secretAccessKey: secretAccessKey || ''
       },
-      // 경로 스타일 URL 사용 (일부 호환성 문제 해결)
+      // Use path style URL (resolves some compatibility issues)
       forcePathStyle: true
     });
 
-    // 대용량 파일을 처리하기 위한 체크 (5MB 이상)
+    // Large file handling check (5MB or more)
     const NORMAL_UPLOAD_LIMIT = 5 * 1024 * 1024; // 5MB
 
     let response;
 
-    // 발신자 ID 저장 (취소 관리를 위해)
+    // Save sender ID (for cancellation management)
     const senderID = event.sender.id;
 
-    // 해당 발신자의 업로드 목록이 없으면 초기화
+    // Initialize upload list for sender if not exists
     if (!activeUploads.has(senderID)) {
       activeUploads.set(senderID, []);
     }
 
     if (fileStats.size > NORMAL_UPLOAD_LIMIT) {
-      console.log(`대용량 파일 처리 시작 - 멀티파트 업로드 사용 (${fileStats.size} 바이트)`);
+      console.log(`Starting large file processing - Multi-part upload using (${fileStats.size} bytes)`);
 
-      // @aws-sdk/client-s3에서는 멀티파트 업로드를 직접 지원하지 않으므로
-      // @aws-sdk/lib-storage를 사용하여 구현
+      // @aws-sdk/client-s3 does not directly support multi-part uploads,
+      // so we use @aws-sdk/lib-storage to implement
       const { Upload } = require('@aws-sdk/lib-storage');
 
       const multipartUpload = new Upload({
@@ -589,20 +646,20 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
           Body: fs.createReadStream(filePath),
           ContentType: contentType
         },
-        queueSize: 4, // 동시 업로드 쓰레드 수
-        partSize: 10 * 1024 * 1024, // 파트 크기(10MB)
+        queueSize: 4, // Number of concurrent upload threads
+        partSize: 10 * 1024 * 1024, // Part size (10MB)
         leavePartsOnError: false
       });
 
-      // 업로드 작업을 활성 목록에 추가
+      // Add upload operation to active list
       uploadOperation = {
         key,
         abort: async () => {
           try {
-            console.log(`멀티파트 업로드 중단: ${key}`);
+            console.log(`Aborting multi-part upload: ${key}`);
             await multipartUpload.abort();
 
-            // 중단 알림 전송
+            // Notify abort
             if (event && event.sender) {
               event.sender.send('upload-progress', {
                 key,
@@ -613,7 +670,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
 
             return true;
           } catch (abortError) {
-            console.error('업로드 중단 중 오류:', abortError);
+            console.error('Error aborting upload:', abortError);
             return false;
           }
         }
@@ -621,13 +678,13 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
 
       activeUploads.get(senderID)?.push(uploadOperation);
 
-      // 진행률 보고
+      // Report progress
       multipartUpload.on('httpUploadProgress', (progress) => {
         const loaded = progress.loaded || 0;
         const percentage = Math.round((loaded / fileStats.size) * 100);
-        console.log(`업로드 진행률: ${percentage}% (${loaded}/${fileStats.size})`);
+        console.log(`Upload progress: ${percentage}% (${loaded}/${fileStats.size})`);
 
-        // 렌더러에 진행 상황 전송
+        // Send progress to renderer
         if (event && event.sender) {
           event.sender.send('upload-progress', {
             key,
@@ -639,9 +696,9 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
       });
 
       response = await multipartUpload.done();
-      console.log('멀티파트 업로드 완료');
+      console.log('Multi-part upload completed');
 
-      // 완료 알림
+      // Notify completion
       if (event && event.sender) {
         event.sender.send('upload-progress', {
           key,
@@ -652,10 +709,11 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
         });
       }
     } else {
-      // 작은 파일은 일반 업로드 사용
-      console.log('일반 업로드 시작');
+      // Use regular upload for small files
+      console.log('Starting regular upload');
       const fileContent = fs.readFileSync(filePath);
 
+      // Create upload file ready command
       const uploadParams = {
         Bucket: bucket,
         Key: key,
@@ -663,17 +721,16 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
         ContentType: contentType
       };
 
-      // 일반 업로드 취소 방법 추가
+      // Add regular upload cancellation method
       uploadOperation = {
         key,
         abort: async () => {
-          console.log(`일반 업로드 중단: ${key}`);
-          // 일반 업로드는 즉시 취소가 어려움 - 취소 상태만 전송
+          console.log(`Aborting regular upload: ${key}`);
+          // Regular upload cannot be aborted immediately - only send cancellation status
           if (event && event.sender) {
             event.sender.send('upload-progress', {
               key,
-              cancelled: true,
-              percentage: 0
+              cancelled: true
             });
           }
           return true;
@@ -684,23 +741,23 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
 
       const command = new PutObjectCommand(uploadParams);
       response = await s3Client.send(command);
-      console.log('일반 업로드 완료');
+      console.log('Regular upload completed');
 
-      // 완료 알림
+      // Notify completion
       if (event && event.sender) {
         event.sender.send('upload-progress', {
           key,
           loaded: fileStats.size,
           total: fileStats.size,
           percentage: 100,
-          completed: true
+          complete: true
         });
       }
     }
 
-    console.log(`파일 업로드 완료: ${bucket}/${key}`);
+    console.log(`File upload completed: ${bucket}/${key}`);
 
-    // 완료된 업로드를 활성 목록에서 제거
+    // Remove completed upload from active list
     if (uploadOperation && senderID) {
       const uploads = activeUploads.get(senderID) || [];
       const index = uploads.findIndex(u => u.key === uploadOperation?.key);
@@ -709,16 +766,16 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
       }
     }
 
-    // 업로드 성공 응답 반환
+    // Return successful upload response
     return {
       success: true,
-      location: `https://${bucket}.s3.${region || 'ap-northeast-2'}.amazonaws.com/${key}`,
-      response
+      location: `https://${bucket}.s3.amazonaws.com/${key}`,
+      etag: response.ETag
     };
   } catch (error: unknown) {
     console.error('Error uploading file to S3:', error);
 
-    // 오류 발생한 업로드 제거
+    // Remove failed upload from active list
     if (uploadOperation && event?.sender?.id) {
       const senderID = event.sender.id;
       const uploads = activeUploads.get(senderID) || [];
@@ -728,62 +785,62 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
       }
     }
 
-    // 오류 알림
+    // Notify error
     if (event && event.sender) {
       event.sender.send('upload-progress', {
-        error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다',
+        error: error instanceof Error ? error.message : 'An unknown error occurred',
         failed: true
       });
     }
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
     };
   }
 });
 
-// S3 파일 삭제 핸들러
+// S3 file deletion handler
 ipcMain.handle('delete-file-from-s3', async (_, params: any) => {
   try {
-    // 파라미터 검증
+    // Parameter validation
     if (!params || typeof params !== 'object') {
-      throw new Error('파라미터는 객체 형태로 전달되어야 합니다');
+      throw new Error('Parameters must be passed as an object');
     }
 
     const { bucket, key } = params;
 
-    // 설정에서 AWS 자격 증명 불러오기
+    // Load AWS credentials from settings
     const encryptedSettings = fs.existsSync(settingsFilePath)
       ? fs.readFileSync(settingsFilePath, 'utf-8')
       : null
 
     if (!encryptedSettings) {
-      throw new Error('AWS 자격 증명을 찾을 수 없습니다')
+      throw new Error('AWS credentials not found')
     }
 
     const settings = JSON.parse(decrypt(encryptedSettings))
 
-    // S3 클라이언트 생성
+    // Create S3 client
     const s3Client = new S3Client({
-      region: 'ap-northeast-2', // 리전 설정
+      region: 'ap-northeast-2', // Region setting
       credentials: {
         accessKeyId: settings.accessKey,
         secretAccessKey: settings.secretKey
       }
     })
 
-    // 파일 삭제 명령 생성
+    // Create file deletion command
     const deleteParams = {
       Bucket: bucket,
       Key: key
     }
 
-    // S3에서 파일 삭제
+    // Delete file from S3
     const command = new DeleteObjectCommand(deleteParams)
     const response = await s3Client.send(command)
 
-    // 메타데이터 파일도 삭제 시도
+    // Try to delete metadata file
     try {
       const metadataKey = `${key}.metadata.json`
       const metadataCommand = new DeleteObjectCommand({
@@ -791,43 +848,45 @@ ipcMain.handle('delete-file-from-s3', async (_, params: any) => {
         Key: metadataKey
       })
       await s3Client.send(metadataCommand)
-      console.log(`메타데이터 파일도 삭제됨: ${metadataKey}`)
+      console.log(`Metadata file also deleted: ${metadataKey}`)
     } catch (err) {
-      // 메타데이터 파일 삭제 실패는 무시
-      console.warn('메타데이터 파일 삭제 실패:', err)
+      // Ignore failure to delete metadata file
+      console.warn('Failed to delete metadata file:', err)
     }
 
     return {
-      success: true,
-      response
+      success: true
     }
   } catch (error: any) {
-    console.error('Error deleting file from S3:', error);
-    return { success: false, error: error.message };
+    console.error('Error deleting file from S3:', error)
+    return {
+      success: false,
+      error: error.message
+    }
   }
 })
 
-// 파일 이름 변경 핸들러
+// File renaming handler
 ipcMain.handle('rename-file-in-s3', async (_, params: any) => {
   try {
     const { bucket, oldKey, newKey } = params;
 
     if (!bucket || !oldKey || !newKey) {
-      throw new Error('Missing required parameters');
+      throw new Error('Missing required parameters (bucket, oldKey, newKey)');
     }
 
     console.log(`Renaming file from ${oldKey} to ${newKey} in bucket ${bucket}`);
 
-    // S3에서는 파일 이름 변경을 위해 복사 후 삭제 방식을 사용
+    // S3 uses copy and delete method for renaming files
     const s3Client = new S3Client({
       region: params.region || 'ap-northeast-2',
       credentials: {
-        accessKeyId: params.accessKeyId || '',
-        secretAccessKey: params.secretAccessKey || ''
+        accessKeyId: params.accessKey || '',
+        secretAccessKey: params.secretKey || ''
       }
     });
 
-    // S3에서 기존 객체 가져오기
+    // Get original object from S3
     const getObjectCommand = new GetObjectCommand({
       Bucket: bucket,
       Key: oldKey
@@ -835,16 +894,17 @@ ipcMain.handle('rename-file-in-s3', async (_, params: any) => {
 
     const originalObject = await s3Client.send(getObjectCommand);
 
-    // 새 위치에 객체 복사
+    // Copy object to new location
     const putCommand = new PutObjectCommand({
       Bucket: bucket,
       Key: newKey,
-      Body: originalObject.Body
+      Body: originalObject.Body,
+      ContentType: originalObject.ContentType
     });
 
     await s3Client.send(putCommand);
 
-    // 원본 파일 삭제
+    // Delete original file
     const deleteCommand = new DeleteObjectCommand({
       Bucket: bucket,
       Key: oldKey
@@ -853,62 +913,66 @@ ipcMain.handle('rename-file-in-s3', async (_, params: any) => {
     await s3Client.send(deleteCommand);
 
     return { success: true };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error renaming file in S3:', error);
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 });
 
-// 저장 위치 선택 핸들러
+// Save location selection handler
 ipcMain.handle('select-save-location', async (_, params: any) => {
   try {
-    const downloadsPath = app.getPath('downloads');
-    const defaultPath = join(downloadsPath, params.defaultPath || 'download');
-
-    console.log(`Opening save dialog with default path: ${defaultPath}`);
+    // Default file name from params or fallback to generic name
+    const defaultPath = params?.defaultPath || join(app.getPath('downloads'), 'downloaded-file');
 
     const result = await dialog.showSaveDialog({
-      title: '파일 저장 위치 선택',
+      title: 'Select File Save Location',
       defaultPath: defaultPath,
-      buttonLabel: '저장',
+      buttonLabel: 'Save',
       properties: ['createDirectory']
     });
 
     if (result.canceled) {
-      return { canceled: true, filePath: null };
+      return { canceled: true };
     }
 
     return {
       canceled: false,
       filePath: result.filePath
     };
-  } catch (error: any) {
-    console.error('Error showing save dialog:', error);
-    return { canceled: true, error: error.message };
+  } catch (error) {
+    console.error('Error selecting save location:', error);
+    return {
+      canceled: true,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 });
 
-// S3에서 파일 다운로드 핸들러
+// S3 file download handler
 ipcMain.handle('download-file-from-s3', async (_, params: any) => {
   try {
-    const { bucket, key, destination } = params;
+    const { bucket, key, destination, region, accessKeyId, secretAccessKey } = params;
 
     if (!bucket || !key || !destination) {
-      throw new Error('Missing required parameters');
+      throw new Error('Missing required parameters (bucket, key, destination)');
     }
 
     console.log(`Downloading file ${key} from bucket ${bucket} to ${destination}`);
 
-    // S3 클라이언트 생성
+    // Create S3 client
     const s3Client = new S3Client({
       region: params.region || 'ap-northeast-2',
       credentials: {
-        accessKeyId: params.accessKeyId || '',
-        secretAccessKey: params.secretAccessKey || ''
+        accessKeyId: accessKeyId || '',
+        secretAccessKey: secretAccessKey || ''
       }
     });
 
-    // S3에서 객체 가져오기
+    // Get object from S3
     const getObjectCommand = new GetObjectCommand({
       Bucket: bucket,
       Key: key
@@ -916,13 +980,13 @@ ipcMain.handle('download-file-from-s3', async (_, params: any) => {
 
     const response = await s3Client.send(getObjectCommand);
 
-    // 스트림을 파일로 저장
+    // Stream to file
     if (response.Body) {
       const fileStream = fs.createWriteStream(destination);
 
-      // @ts-ignore: Body 타입이 맞지 않을 수 있음
+      // @ts-ignore: Body type may not match
       await new Promise((resolve, reject) => {
-        // @ts-ignore: Body 타입이 맞지 않을 수 있음
+        // @ts-ignore: Body type may not match
         response.Body.pipe(fileStream)
           .on('error', (err) => {
             reject(err);
@@ -932,209 +996,231 @@ ipcMain.handle('download-file-from-s3', async (_, params: any) => {
           });
       });
 
-      return { success: true, filePath: destination };
+      return { success: true };
     } else {
-      throw new Error('No file content received from S3');
+      throw new Error('Response body is empty');
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error downloading file from S3:', error);
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 });
 
-// 복호화 함수 (AES-256-CBC) - 성능 최적화
+// Decryption function (AES-256-CBC) - Performance optimization
 function decrypt(text: string): string {
   try {
     if (!text || typeof text !== 'string') {
-      throw new TypeError('복호화할 데이터는 유효한 문자열이어야 합니다');
+      throw new TypeError('Decryptable data must be a valid string');
     }
 
-    // IV와 암호화된 데이터 분리
+    // Separate IV and encrypted data
     const textParts = text.split(':');
     if (textParts.length < 2) {
-      throw new Error('유효하지 않은 암호화 형식입니다');
+      throw new Error('Invalid encrypted format - missing IV separator');
     }
 
     const iv = Buffer.from(textParts.shift() || '', 'hex');
-    const encryptedText = textParts.join(':');
+    if (iv.length !== 16) {
+      throw new Error('Invalid IV length - must be 16 bytes');
+    }
 
-    // 미리 생성된 키 사용
+    const encryptedText = textParts.join(':');
+    if (!encryptedText || encryptedText.length === 0) {
+      throw new Error('Empty encrypted data');
+    }
+
+    // Validate input format
+    try {
+      Buffer.from(encryptedText, 'hex');
+    } catch (e) {
+      throw new Error('Encrypted data is not valid hex');
+    }
+
+    // Use pre-generated key
     const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
     let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
   } catch (error: any) {
-    throw new Error(`복호화 처리 실패: ${error.message}`);
+    console.error('Decrypt processing details:', {
+      error: error.message,
+      errorName: error.name,
+      stack: error.stack
+    });
+    throw new Error(`Decrypt processing failed: ${error.message}`);
   }
 }
 
-// 암호화 함수 (AES-256-CBC) - 성능 최적화
+// Encryption function (AES-256-CBC) - Performance optimization
 function encrypt(text: string): string {
   try {
     if (!text || typeof text !== 'string') {
-      throw new TypeError('암호화할 데이터는 유효한 문자열이어야 합니다');
+      throw new TypeError('Encryptable data must be a valid string');
     }
 
-    const iv = crypto.randomBytes(16); // 초기화 벡터
-    // 미리 생성된 키 사용
+    const iv = crypto.randomBytes(16); // Initialization vector
+    // Use pre-generated key
     const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY_BUFFER, iv);
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    return iv.toString('hex') + ':' + encrypted; // IV와 암호화된 데이터 함께 저장
+    return iv.toString('hex') + ':' + encrypted; // Save IV and encrypted data together
   } catch (error: any) {
-    throw new Error(`암호화 처리 실패: ${error.message}`);
+    throw new Error(`Encrypt processing failed: ${error.message}`);
   }
 }
 
-// 앱 시작 시 임시 디렉토리 생성
+// App start - Create temporary directory
 function setupTempDirectory() {
   try {
     if (!fs.existsSync(appTempDir)) {
       fs.mkdirSync(appTempDir, { recursive: true });
-      console.log(`임시 디렉토리 생성됨: ${appTempDir}`);
+      console.log(`Temporary directory created: ${appTempDir}`);
     }
   } catch (error) {
-    console.error('임시 디렉토리 생성 실패:', error);
+    console.error('Temporary directory creation failed:', error);
   }
 }
 
-// 임시 파일 생성 핸들러 (대용량 파일용)
+// Temporary file creation handler (for large files)
 ipcMain.handle('create-temp-file', async (_, { fileName, totalSize }) => {
   try {
-    // 임시 디렉토리가 없으면 생성
+    // Create temporary directory if it doesn't exist
     if (!fs.existsSync(appTempDir)) {
       fs.mkdirSync(appTempDir, { recursive: true });
     }
 
-    // 고유한 파일명 생성
+    // Generate unique file name
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).substring(2, 10);
     const tempFileName = `${timestamp}-${randomSuffix}-${fileName}`;
     const tempFilePath = join(appTempDir, tempFileName);
 
-    // 파일 생성 및 크기 예약
+    // Create file and reserve size
     fs.writeFileSync(tempFilePath, Buffer.alloc(0));
 
-    // 파일 크기를 지정된 크기로 설정 (희소 파일)
+    // Set file size to specified size (sparse file)
     const fd = fs.openSync(tempFilePath, 'r+');
     fs.ftruncateSync(fd, totalSize);
     fs.closeSync(fd);
 
-    console.log(`임시 파일 생성됨: ${tempFilePath} (${totalSize} bytes)`);
+    console.log(`Temporary file created: ${tempFilePath} (${totalSize} bytes)`);
     return tempFilePath;
   } catch (error: unknown) {
-    console.error('임시 파일 생성 중 오류:', error);
+    console.error('Error creating temporary file:', error);
     return null;
   }
 });
 
-// 임시 파일에 데이터 추가 핸들러
+// Temporary file data addition handler
 ipcMain.handle('append-to-temp-file', async (_, { filePath, buffer, offset }) => {
   try {
     if (!fs.existsSync(filePath)) {
-      throw new Error('파일이 존재하지 않습니다');
+      throw new Error('File does not exist');
     }
 
-    // 파일 열기 (쓰기 모드)
+    // Open file (write mode)
     const fileHandle = fs.openSync(filePath, 'r+');
 
     try {
-      // 지정된 오프셋에 데이터 쓰기
+      // Write data at specified offset
       fs.writeSync(fileHandle, new Uint8Array(buffer), 0, buffer.length, offset);
       return { success: true };
     } finally {
-      // 파일 핸들 닫기
+      // Close file handle
       fs.closeSync(fileHandle);
     }
   } catch (error: unknown) {
-    console.error('임시 파일에 데이터 추가 중 오류:', error);
-    return { success: false, error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다' };
+    console.error('Error appending data to temporary file:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred' };
   }
 });
 
-// 임시 파일 삭제 핸들러
+// Temporary file deletion handler
 ipcMain.handle('delete-temp-file', async (_, { filePath }) => {
   try {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      console.log(`임시 파일 삭제됨: ${filePath}`);
+      console.log(`Temporary file deleted: ${filePath}`);
       return { success: true };
     } else {
-      return { success: false, error: '파일이 존재하지 않음' };
+      return { success: false, error: 'File does not exist' };
     }
   } catch (error: any) {
-    console.error('임시 파일 삭제 중 오류:', error);
+    console.error('Error deleting temporary file:', error);
     return { success: false, error: error.message };
   }
 });
 
-// 임시 파일 저장 핸들러
+// Temporary file saving handler
 ipcMain.handle('save-temp-file', async (_, params) => {
   try {
-    console.log('save-temp-file 호출됨:', params);
+    console.log('save-temp-file called:', params);
 
-    // 유효성 검사
+    // Validation
     if (!params || typeof params !== 'object') {
-      throw new Error('유효한 파라미터가 아닙니다');
+      throw new Error('Invalid parameters');
     }
 
     const { buffer, fileName } = params;
 
     if (!buffer) {
-      throw new Error('파일 데이터가 누락되었습니다');
+      throw new Error('File data is missing');
     }
 
     if (!fileName) {
-      throw new Error('파일 이름이 누락되었습니다');
+      throw new Error('File name is missing');
     }
 
-    // 임시 디렉토리가 없으면 생성
+    // Create temporary directory if it doesn't exist
     if (!fs.existsSync(appTempDir)) {
       fs.mkdirSync(appTempDir, { recursive: true });
     }
 
-    // 고유한 파일명 생성 (타임스탬프 + 난수 + 원본 파일명)
+    // Generate unique file name (timestamp + random + original file name)
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).substring(2, 10);
     const tempFileName = `${timestamp}-${randomSuffix}-${fileName}`;
     const tempFilePath = join(appTempDir, tempFileName);
 
-    console.log(`임시 파일 생성 중: ${tempFilePath} (${buffer.byteLength} bytes)`);
+    console.log(`Temporary file creation in progress: ${tempFilePath} (${buffer.byteLength} bytes)`);
 
-    // 파일 저장
+    // Save file
     fs.writeFileSync(tempFilePath, Buffer.from(buffer));
 
-    console.log(`임시 파일 생성 완료: ${tempFilePath}`);
+    console.log(`Temporary file creation completed: ${tempFilePath}`);
     return tempFilePath;
   } catch (error: unknown) {
-    console.error('임시 파일 저장 중 오류:', error);
+    console.error('Error saving temporary file:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+      error: error instanceof Error ? error.message : 'An unknown error occurred'
     };
   }
 });
 
-// 앱 종료 시 임시 디렉토리 정리
+// App exit - Clean up temporary directory
 function cleanupTempDirectory() {
   try {
     if (fs.existsSync(appTempDir)) {
       fs.rmSync(appTempDir, { recursive: true, force: true });
-      console.log(`임시 디렉토리 삭제됨: ${appTempDir}`);
+      console.log(`Temporary directory deleted: ${appTempDir}`);
     }
   } catch (error: unknown) {
-    console.error('임시 디렉토리 삭제 실패:', error);
+    console.error('Temporary directory deletion failed:', error);
   }
 }
 
-// 업데이트 확인 요청 처리
+// Update check request handler
 ipcMain.handle('check-for-updates', async () => {
   if (!is.dev) {
     autoUpdater.checkForUpdates();
   }
 });
 
-// 업데이트 체크 함수
+// Update check function
 const checkForUpdates = async () => {
   try {
     const updateUrl = process.env.UPDATE_URL || 'https://nbase-io.github.io/studio/patches/electron-update.yml'
@@ -1145,97 +1231,144 @@ const checkForUpdates = async () => {
     if (data.version !== currentVersion) {
       const dialogOpts: Electron.MessageBoxOptions = {
         type: 'info',
-        buttons: ['다운로드', '나중에'],
-        title: '업데이트 가능',
-        message: '새로운 버전이 있습니다. 다운로드하시겠습니까?',
-        detail: `현재 버전: ${currentVersion}\n새 버전: ${data.version}`
+        buttons: ['Download', 'Later'],
+        title: 'Update Available',
+        message: 'A new version is available. Would you like to download it now?',
+        detail: `Current version: ${currentVersion}\nNew version: ${data.version}`
       }
 
       const { response } = await dialog.showMessageBox(dialogOpts)
       if (response === 0) {
-        shell.openExternal(`https://your-username.github.io/your-repo/${data.path}`)
+        shell.openExternal(`https://nbase-io.github.io/studio/patches/${data.path}`)
       }
     }
   } catch (error) {
-    console.error('업데이트 체크 실패:', error)
+    console.error('Update check failed:', error)
   }
 }
 
-// 앱 버전 정보 요청 처리
+// App version info request handler
 ipcMain.handle('get-app-version', () => {
   return {
     version: app.getVersion()
   };
 });
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
+// App startup - Clear temporary files
 app.whenReady().then(() => {
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  setupTempDirectory();
+  clearTempFiles();
 
-  // 전역 CSP 설정 (모든 창에 적용)
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* https://*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; frame-src 'self' https://dash.gamepot.beta.ntruss.com/;"
-        ]
+  // 손상된 설정 파일이 있는지 확인하고 처리
+  try {
+    if (fs.existsSync(settingsFilePath)) {
+      try {
+        const encryptedSettings = fs.readFileSync(settingsFilePath, 'utf-8');
+        if (encryptedSettings && encryptedSettings.trim() !== '') {
+          try {
+            const decryptedData = decrypt(encryptedSettings);
+            // 복호화 성공 시 파싱 테스트
+            JSON.parse(decryptedData);
+            console.log('Settings file integrity check passed');
+          } catch (error) {
+            console.error('Settings file corrupted, backing up and removing:', error);
+            const backupPath = `${settingsFilePath}.corrupted.${Date.now()}`;
+            fs.copyFileSync(settingsFilePath, backupPath);
+            fs.unlinkSync(settingsFilePath);
+            console.log(`Corrupted settings backed up to ${backupPath} and removed`);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to read settings file:', error);
       }
+    }
+  } catch (error) {
+    console.error('Error during settings verification:', error);
+  }
+
+  // Intercept file:// protocol for security
+  protocol.interceptFileProtocol('file', (request, callback) => {
+    const url = request.url.substring(7); // Remove 'file://' prefix
+    callback({ path: url });
+  });
+
+  // Create main window after app is ready
+  createWindow();
+
+  // Event handler for application activation
+  app.on('activate', () => {
+    // On macOS, recreate window when dock icon is clicked and no windows are open
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+// Close handler - Clean up before exit
+app.on('before-quit', () => {
+  // Make sure to clean up active uploads
+  activeUploads.forEach((uploads, senderID) => {
+    uploads.forEach(upload => {
+      console.log(`Aborting upload for ${upload.key} during app quit`);
+      upload.abort();
     });
   });
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
+  // Clear temp directory
+  clearTempFiles();
+});
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
-
-  // 개발자 도구 열기 핸들러
-  ipcMain.on('open-devtools', (event) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (window) {
-      window.webContents.openDevTools()
+// Cleanup all temporary files
+function clearTempFiles() {
+  try {
+    if (fs.existsSync(appTempDir)) {
+      const files = fs.readdirSync(appTempDir);
+      for (const file of files) {
+        const filePath = join(appTempDir, file);
+        try {
+          fs.unlinkSync(filePath);
+        } catch (err) {
+          console.error(`Failed to delete ${filePath}:`, err);
+        }
+      }
+      console.log(`Cleared ${files.length} temporary files`);
     }
-  })
-
-  // 임시 디렉토리 설정
-  setupTempDirectory();
-
-  createWindow()
-
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-
-  // 1시간마다 업데이트 체크
-  setInterval(checkForUpdates, 60 * 60 * 1000)
-  checkForUpdates()
-})
-
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    // 앱 종료 시 임시 디렉토리 정리
-    cleanupTempDirectory();
-    app.quit()
+  } catch (error) {
+    console.error('Error clearing temporary files:', error);
   }
-})
+}
 
-// 앱이 완전히 종료될 때 호출
-app.on('will-quit', () => {
-  // 앱 종료 시 임시 디렉토리 정리
-  cleanupTempDirectory();
+// All window close event handler (macOS specific)
+app.on('window-all-closed', () => {
+  // Quit application on all platforms except macOS
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+// Handle IPC errors globally
+ipcMain.on('error', (_, error) => {
+  console.error('IPC Error:', error);
+
+  // Show error dialog for critical errors
+  if (win) {
+    dialog.showErrorBox('Application Error',
+      error.message || 'An unknown error occurred');
+  }
+});
+
+// Prevent crash from unhandled rejections
+process.on('unhandledRejection', (reason, p) => {
+  console.error('Unhandled Rejection at Promise:', p, 'reason:', reason);
+});
+
+// Catch uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+
+  // Show error dialog
+  if (win) {
+    dialog.showErrorBox('Critical Error',
+      `An uncaught exception occurred: ${error.message}`);
+  }
 });
 
 // In this file you can include the rest of your app"s specific main process

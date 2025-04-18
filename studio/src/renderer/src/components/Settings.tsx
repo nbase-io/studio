@@ -37,7 +37,7 @@ function Settings(): JSX.Element {
     s3Bucket: '',
     projectId: '',
     apiKey: '',
-    serverUrl: 'http://localhost:4000',
+    serverUrl: 'https://plugin.gamepot.ntruss.com',
     cdnUrl: '',
     endpointUrl: ''
   })
@@ -61,7 +61,7 @@ function Settings(): JSX.Element {
         s3Bucket: globalSettings.s3Bucket || '',
         projectId: globalSettings.projectId || '',
         apiKey: globalSettings.apiKey || '',
-        serverUrl: globalSettings.serverUrl || 'http://localhost:4000',
+        serverUrl: globalSettings.serverUrl || 'https://plugin.gamepot.ntruss.com',
         cdnUrl: globalSettings.cdnUrl || '',
         endpointUrl: globalSettings.endpointUrl || ''
       });
@@ -293,7 +293,7 @@ function Settings(): JSX.Element {
                     id="serverUrl"
                     value={settings.serverUrl}
                     onChange={(e) => handleInputChange('serverUrl', e.target.value)}
-                    placeholder="http://localhost:4000"
+                    placeholder="https://plugin.gamepot.ntruss.com"
                     className="h-8 text-xs"
                   />
                 </div>

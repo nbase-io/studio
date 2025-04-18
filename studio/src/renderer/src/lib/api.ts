@@ -81,7 +81,7 @@ export class ApiService {
 
   constructor() {
     // Default values, will be updated when loadSettings is called
-    this.baseUrl = 'http://localhost:4000';
+    this.baseUrl = 'https://plugin.gamepot.ntruss.com';
     this.projectId = '';
     this.apiKey = '';
     this.cdnUrl = '';
@@ -113,7 +113,7 @@ export class ApiService {
 
     // Set default values if no settings
     if (!this.baseUrl) {
-      this.baseUrl = 'http://localhost:4000';
+      this.baseUrl = 'https://plugin.gamepot.ntruss.com';
     }
 
     // Check URL format and modify

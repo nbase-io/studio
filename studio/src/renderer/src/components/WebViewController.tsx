@@ -3,6 +3,7 @@ import {
   Plus, X, Maximize, Minimize, RefreshCcw, ArrowLeft, ArrowRight, RotateCw,
   Home, BookmarkPlus, Bookmark, Search, Zap, AlertTriangle, Loader2, ZoomIn, ZoomOut
 } from 'lucide-react';
+import { useSettings } from '../main';
 
 interface Tab {
   id: string;
@@ -28,17 +29,39 @@ interface WebViewControllerProps {
 // 탭 저장 키
 const SAVED_TABS_KEY = 'gamepot-studio-saved-tabs';
 const BOOKMARKS_KEY = 'gamepot-studio-bookmarks';
-// 홈 URL 상수
-const HOME_URL = 'https://dash.gamepot.beta.ntruss.com';
+// 홈 URL 기본값
+const BASE_URL = 'https://dash.gamepot.beta.ntruss.com';
 
 const WebViewController: React.FC<WebViewControllerProps> = ({
   initialTabs = [],
-  defaultUrl = HOME_URL
+  defaultUrl
 }) => {
+  // 설정에서 로그인 정보 가져오기
+  const { settings } = useSettings();
+
+  // HOME_URL 계산 - 프로젝트ID와 API KEY를 쿼리 파라미터로 전달
+  const HOME_URL = React.useMemo(() => {
+    // 기본 URL 설정
+    let url = BASE_URL;
+
+    // 프로젝트 ID와 API KEY가 있으면 URL에 추가
+    if (settings.projectId && settings.apiKey) {
+      url += `/projects/${settings.projectId}?apiKey=${encodeURIComponent(settings.apiKey)}`;
+      if (settings.region) {
+        url += `&region=${encodeURIComponent(settings.region)}`;
+      }
+    }
+
+    return url;
+  }, [settings.projectId, settings.apiKey, settings.region]);
+
+  // 빈 defaultUrl이면 계산된 HOME_URL 사용
+  const effectiveDefaultUrl = defaultUrl || HOME_URL;
+
   const [tabs, setTabs] = useState<Tab[]>(
     initialTabs.length > 0
       ? initialTabs
-      : [{ id: crypto.randomUUID(), title: 'GamePot Dashboard', url: defaultUrl }]
+      : [{ id: crypto.randomUUID(), title: 'GamePot Dashboard', url: effectiveDefaultUrl }]
   );
   const [activeTabId, setActiveTabId] = useState<string>(
     initialTabs.length > 0 ? initialTabs[0].id : tabs[0].id
@@ -58,6 +81,41 @@ const WebViewController: React.FC<WebViewControllerProps> = ({
   const urlInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // 로그인 정보 변경 시 대시보드 URL 업데이트
+  useEffect(() => {
+    // 로그인 정보가 없으면 아무것도 하지 않음
+    if (!settings.projectId || !settings.apiKey) {
+      return;
+    }
+
+    // 활성 탭이 GamePot Dashboard인 경우에만 URL 업데이트
+    const activeTab = tabs.find(tab => tab.id === activeTabId);
+    if (activeTab && activeTab.url.startsWith(BASE_URL)) {
+      // 디버깅 로그
+      console.log('로그인 정보 변경 감지, 대시보드 URL 업데이트:', HOME_URL);
+
+      // URL 업데이트 및 새로고침
+      setTabs(prevTabs =>
+        prevTabs.map(tab =>
+          tab.id === activeTabId ? { ...tab, url: HOME_URL } : tab
+        )
+      );
+
+      if (activeTabId) {
+        setCurrentUrl(HOME_URL);
+      }
+
+      // 새로고침
+      setTimeout(() => {
+        const webview = webviewRefs.current.get(activeTabId);
+        if (webview) {
+          console.log('웹뷰 새로고침 실행');
+          webview.reload();
+        }
+      }, 100);
+    }
+  }, [HOME_URL, settings.projectId, settings.apiKey, settings.region, tabs, activeTabId]);
+
   // 네트워크 상태 감시
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -71,6 +129,18 @@ const WebViewController: React.FC<WebViewControllerProps> = ({
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // 탭 URL 업데이트 함수
+  const updateTabUrl = (id: string, url: string) => {
+    setTabs(prevTabs =>
+      prevTabs.map(tab =>
+        tab.id === id ? { ...tab, url } : tab
+      )
+    );
+    if (id === activeTabId) {
+      setCurrentUrl(url);
+    }
+  };
 
   // 키보드 단축키 처리
   useEffect(() => {
@@ -198,7 +268,23 @@ const WebViewController: React.FC<WebViewControllerProps> = ({
   useEffect(() => {
     // 간소화된 버전으로 변경 - 복잡한 객체 사용 제거
     console.log('세션 초기화 준비 완료');
-  }, []);
+
+    // API 인증 정보가 있는 경우 웹뷰에 쿠키 설정
+    if (settings.projectId && settings.apiKey) {
+      setTimeout(() => {
+        const webview = getActiveWebview();
+        if (webview) {
+          // 필요한 쿠키 설정
+          webview.executeJavaScript(`
+            document.cookie = "projectId=${settings.projectId}; path=/; domain=.ntruss.com";
+            document.cookie = "apiKey=${settings.apiKey}; path=/; domain=.ntruss.com";
+            document.cookie = "region=${settings.region || 'ap-northeast-2'}; path=/; domain=.ntruss.com";
+            console.log('GamePot Studio에서 인증 쿠키를 설정했습니다.');
+          `);
+        }
+      }, 1000);
+    }
+  }, [settings.projectId, settings.apiKey, settings.region, activeTabId]);
 
   // 탭 저장하기
   const saveTabs = useCallback(() => {
@@ -230,13 +316,13 @@ const WebViewController: React.FC<WebViewControllerProps> = ({
       }
 
       // 저장된 탭이 없으면 기본 탭 생성
-      const defaultTab = { id: crypto.randomUUID(), title: 'GamePot Dashboard', url: defaultUrl };
+      const defaultTab = { id: crypto.randomUUID(), title: 'GamePot Dashboard', url: effectiveDefaultUrl };
       setTabs([defaultTab]);
       setActiveTabId(defaultTab.id);
     } catch (error) {
       console.error('저장된 탭 불러오기 실패:', error);
       // 오류 발생 시 기본 탭 생성
-      const defaultTab = { id: crypto.randomUUID(), title: 'GamePot Dashboard', url: defaultUrl };
+      const defaultTab = { id: crypto.randomUUID(), title: 'GamePot Dashboard', url: effectiveDefaultUrl };
       setTabs([defaultTab]);
       setActiveTabId(defaultTab.id);
     }
@@ -259,7 +345,7 @@ const WebViewController: React.FC<WebViewControllerProps> = ({
   };
 
   // 탭 추가
-  const addTab = (url: string = defaultUrl) => {
+  const addTab = (url: string = effectiveDefaultUrl) => {
     const newId = crypto.randomUUID();
     const newTab: Tab = {
       id: newId,
@@ -278,7 +364,7 @@ const WebViewController: React.FC<WebViewControllerProps> = ({
 
     if (tabs.length === 1) {
       // 마지막 탭은 URL만 초기화
-      const resetTab = { id: tabs[0].id, title: 'GamePot Dashboard', url: defaultUrl, isLoading: true };
+      const resetTab = { id: tabs[0].id, title: 'GamePot Dashboard', url: effectiveDefaultUrl, isLoading: true };
       setTabs([resetTab]);
       setActiveTabId(resetTab.id);
       return;

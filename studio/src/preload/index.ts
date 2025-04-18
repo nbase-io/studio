@@ -18,6 +18,11 @@ const api = {
     return ipcRenderer.invoke('get-app-version')
   },
 
+  // 앱 종료 함수
+  quitApp: (): void => {
+    ipcRenderer.send('quit-app')
+  },
+
   // shell API 추가
   shell: {
     openExternal: (url: string) => shell.openExternal(url)

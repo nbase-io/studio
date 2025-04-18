@@ -1,16 +1,22 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Builds from './components/Builds'
 import Settings from './components/Settings'
 import DesignEditor from './components/DesignEditor'
 import FileManager from './components/FileManager'
 import UpdateNotification from './components/UpdateNotification'
 import WebViewController from './components/WebViewController'
+import Login from './components/Login'
 import { ErrorDialogProvider, useErrorDialog, setErrorDialogFunction } from './components/ErrorDialog'
+import { useSettings } from './main'
 
 // ErrorDialog를 사용하는 내부 컴포넌트
 function AppContent(): JSX.Element {
   const [activePage, setActivePage] = useState<string>('builds')
   const { showError } = useErrorDialog();
+  const { settings, loading, loadSettings } = useSettings();
+
+  // 로그인 모달 상태
+  const [showLogin, setShowLogin] = useState(true); // 기본값을 true로 설정
 
   // 전역 에러 함수 설정
   React.useEffect(() => {
@@ -18,7 +24,49 @@ function AppContent(): JSX.Element {
     return () => setErrorDialogFunction(() => {});
   }, [showError]);
 
+  // 앱 시작 시 설정 강제 로드
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  // // 로그인 여부 확인
+  // useEffect(() => {
+  //   if (!loading) {
+  //     // 로그인이 필요한지 확인
+  //     // 프로젝트 ID와 API KEY가 둘 다 있어야 로그인된 상태로 간주
+  //     const hasValidSettings = !!(settings.projectId && settings.apiKey);
+  //     setShowLogin(!hasValidSettings);
+
+  //   }
+  // }, [settings, loading]);
+
   const renderContent = () => {
+    // 로그인 모달을 표시해야 하는 경우
+    if (showLogin) {
+      return (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
+          <Login
+            onSuccess={() => {
+              setShowLogin(false);
+              // 설정 다시 로드
+              loadSettings();
+            }}
+            onCancel={() => {
+              // Cancel button when clicked
+              // Only allow cancellation if there are valid settings
+              if (settings.projectId && settings.apiKey) {
+                setShowLogin(false);
+              } else {
+                // Show message when trying to cancel initial setup
+                showError('Login Required', 'Login is required to use GamePot Studio.');
+              }
+            }}
+          />
+        </div>
+      );
+    }
+
+    // 로그인된 상태라면 일반 콘텐츠 표시
     switch (activePage) {
       // case 'gamepot':
       //   return <WebViewController defaultUrl="https://dash.gamepot.beta.ntruss.com/demo" />
@@ -35,110 +83,149 @@ function AppContent(): JSX.Element {
     }
   }
 
+  // 설정 페이지로 이동하는 핸들러
+  const goToSettings = () => {
+    setActivePage('settings');
+    setShowLogin(false); // 세팅 화면으로 이동시 로그인 모달 숨기기
+  };
+
   return (
     <div className="h-screen flex">
-      {/* 왼쪽 사이드바 메뉴 */}
-      <div className="w-16 border-r flex flex-col items-center py-4 bg-gray-50">
-
-        <button
-          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
-            activePage === 'builds' ? 'bg-gray-200' : ''
-          }`}
-          onClick={() => setActivePage('builds')}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+      {/* 로그인 모달이 표시 중이 아닐 때만 사이드바 표시 */}
+      {!showLogin && (
+        <div className="w-16 border-r flex flex-col items-center py-4 bg-gray-50">
+          <button
+            className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+              activePage === 'builds' ? 'bg-gray-200' : ''
+            }`}
+            onClick={() => setActivePage('builds')}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-            />
-          </svg>
-        </button>
-        <button
-          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
-            activePage === 'design' ? 'bg-gray-200' : ''
-          }`}
-          onClick={() => setActivePage('design')}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+              />
+            </svg>
+          </button>
+          <button
+            className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+              activePage === 'design' ? 'bg-gray-200' : ''
+            }`}
+            onClick={() => setActivePage('design')}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
-            />
-          </svg>
-        </button>
-        <button
-          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
-            activePage === 'files' ? 'bg-gray-200' : ''
-          }`}
-          onClick={() => setActivePage('files')}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+              />
+            </svg>
+          </button>
+          <button
+            className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+              activePage === 'files' ? 'bg-gray-200' : ''
+            }`}
+            onClick={() => setActivePage('files')}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-            />
-          </svg>
-        </button>
-        <button
-          className={`p-2 rounded-md flex items-center justify-center mb-4 ${
-            activePage === 'settings' ? 'bg-gray-200' : ''
-          }`}
-          onClick={() => setActivePage('settings')}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+              />
+            </svg>
+          </button>
+          <button
+            className={`p-2 rounded-md flex items-center justify-center mb-4 ${
+              activePage === 'settings' ? 'bg-gray-200' : ''
+            }`}
+            onClick={() => setActivePage('settings')}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-        </button>
-      </div>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* 메인 콘텐츠 영역 */}
       <div className="flex-1 flex flex-col">
         {renderContent()}
 
-        {/* 업데이트 알림 컴포넌트 */}
-        <UpdateNotification />
+        {/* 업데이트 알림 컴포넌트 - 로그인 모달이 표시 중이 아닐 때만 표시 */}
+        {!showLogin && <UpdateNotification />}
       </div>
+
+      {/* 설정 버튼 - 로그인 화면에서만 표시 */}
+      {showLogin && (
+        <div className="fixed bottom-4 right-4">
+          <button
+            className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shadow-md"
+            onClick={goToSettings}
+            title="Settings"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 text-gray-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

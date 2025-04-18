@@ -78,7 +78,7 @@ const defaultSettings: Settings = {
   s3Bucket: '',
   projectId: '',
   apiKey: '',
-  serverUrl: 'http://localhost:4000',
+  serverUrl: 'https://plugin.gamepot.ntruss.com',
   cdnUrl: ''
 }
 
