@@ -5,6 +5,11 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   // 설정 저장 함수
   saveSettings: (settings: Record<string, unknown>): Promise<any> => {
+    console.log('Preload: saveSettings called with:', {
+      type: typeof settings,
+      keys: Object.keys(settings),
+      regionValue: settings.region
+    });
     return ipcRenderer.invoke('save-settings', settings)
   },
 
@@ -20,7 +25,29 @@ const api = {
 
   // 앱 종료 함수
   quitApp: (): void => {
-    ipcRenderer.send('quit-app')
+    console.log('Sending quit-app event to main process');
+    // 여러 번 보내서 확실하게 처리
+    ipcRenderer.send('quit-app');
+    setTimeout(() => ipcRenderer.send('quit-app'), 100);
+
+    // 백업 방법 - process.exit 호출 (remote 모듈이 활성화된 경우)
+    try {
+      const remote = require('@electron/remote');
+      if (remote) {
+        setTimeout(() => {
+          console.log('Fallback: Using remote to exit app');
+          remote.app.exit(0);
+        }, 200);
+      }
+    } catch (e) {
+      console.log('Remote module not available for fallback exit');
+    }
+  },
+
+  // 앱 강제 종료 함수
+  forceQuit: (): void => {
+    console.log('Sending force-quit event to main process');
+    ipcRenderer.send('force-quit');
   },
 
   // shell API 추가

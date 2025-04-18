@@ -324,18 +324,26 @@ function createWindow(): void {
 }
 
 // Settings save handler
-ipcMain.handle('save-settings', async (_, settings: string) => {
+ipcMain.handle('save-settings', async (_, settings: any) => {
   try {
     // Parameter validation
-    if (!settings || typeof settings !== 'string') {
-      throw new Error('Invalid settings data');
+    if (!settings) {
+      throw new Error('Invalid settings data: settings is null or undefined');
     }
 
-    // Convert object to JSON string
-    const settingsJson = JSON.stringify(settings);
+    // Convert object to JSON string if needed
+    let settingsJson: string;
+    if (typeof settings === 'string') {
+      settingsJson = settings;
+    } else if (typeof settings === 'object') {
+      settingsJson = JSON.stringify(settings);
+    } else {
+      throw new Error(`Invalid settings data type: ${typeof settings}`);
+    }
 
-    // Add debug log
-    console.log('Settings data to save:', settingsJson.substring(0, 50) + '...');
+    // Add detailed debug log
+    console.log('Settings data type:', typeof settings);
+    console.log('Settings data to save (partial):', settingsJson.substring(0, 100) + '...');
 
     // Apply additional encryption
     const encryptedSettings = encrypt(settingsJson);
@@ -1353,6 +1361,31 @@ ipcMain.on('error', (_, error) => {
     dialog.showErrorBox('Application Error',
       error.message || 'An unknown error occurred');
   }
+});
+
+// 앱 종료 이벤트 핸들러
+ipcMain.on('quit-app', () => {
+  console.log('Quit app command received, forcing application exit');
+  try {
+    // 열려있는 모든 창 닫기
+    const windows = BrowserWindow.getAllWindows();
+    for (const window of windows) {
+      window.destroy();
+    }
+
+    // 앱 종료 (강제)
+    app.exit(0);
+  } catch (error) {
+    console.error('Failed to quit app:', error);
+    // 실패 시 process.exit로 강제 종료
+    process.exit(0);
+  }
+});
+
+// 앱 강제 종료 이벤트 핸들러
+ipcMain.on('force-quit', () => {
+  console.log('Force quit command received, exiting immediately');
+  process.exit(0);
 });
 
 // Prevent crash from unhandled rejections

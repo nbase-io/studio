@@ -26,19 +26,36 @@ function AppContent(): JSX.Element {
 
   // 앱 시작 시 설정 강제 로드
   useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
+    const loadInitialSettings = async () => {
+      try {
+        await loadSettings();
+        console.log('Initial settings loaded');
+      } catch (error) {
+        console.error('Failed to load initial settings:', error);
+        showError('설정 로드 실패', '설정을 로드하는 중 오류가 발생했습니다.');
+      }
+    };
 
-  // // 로그인 여부 확인
-  // useEffect(() => {
-  //   if (!loading) {
-  //     // 로그인이 필요한지 확인
-  //     // 프로젝트 ID와 API KEY가 둘 다 있어야 로그인된 상태로 간주
-  //     const hasValidSettings = !!(settings.projectId && settings.apiKey);
-  //     setShowLogin(!hasValidSettings);
+    loadInitialSettings();
+  }, []); // 의존성 없이 한 번만 실행
 
-  //   }
-  // }, [settings, loading]);
+  // 로그인 여부 확인
+  useEffect(() => {
+    if (!loading) {
+      // 설정이 존재하는지 확인
+      const hasValidSettings = settings &&
+                               typeof settings === 'object' &&
+                               Object.keys(settings).length > 0 &&
+                               !!settings.projectId &&
+                               !!settings.apiKey;
+
+      // 로그 한 번만 출력
+      console.log('Settings check:', { hasSettings: !!settings, hasValidSettings });
+
+      // 로그인 화면 표시 여부 설정
+      setShowLogin(!hasValidSettings);
+    }
+  }, [loading]); // settings 의존성 제거하여 무한 루프 방지
 
   const renderContent = () => {
     // 로그인 모달을 표시해야 하는 경우
@@ -47,18 +64,21 @@ function AppContent(): JSX.Element {
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
           <Login
             onSuccess={() => {
+              console.log('Login successful');
               setShowLogin(false);
-              // 설정 다시 로드
-              loadSettings();
+              // 설정 다시 로드하지 않음 - Login 컴포넌트에서 이미 저장함
             }}
             onCancel={() => {
               // Cancel button when clicked
               // Only allow cancellation if there are valid settings
-              if (settings.projectId && settings.apiKey) {
+              const hasSettings = settings && typeof settings === 'object' && Object.keys(settings).length > 0;
+              const hasValidCredentials = hasSettings && !!settings.projectId && !!settings.apiKey;
+
+              if (hasValidCredentials) {
                 setShowLogin(false);
               } else {
                 // Show message when trying to cancel initial setup
-                showError('Login Required', 'Login is required to use GamePot Studio.');
+                showError('설정 필요', '게임팟 스튜디오를 사용하려면 설정이 필요합니다.');
               }
             }}
           />

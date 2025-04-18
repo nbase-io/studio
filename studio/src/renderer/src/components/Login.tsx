@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,10 +29,21 @@ export function Login({ onSuccess, onCancel }: LoginProps): JSX.Element {
 
   // Local state
   const [formData, setFormData] = useState({
-    projectId: '',
-    region: 'ap-northeast-2', // 기본값으로 고정
-    apiKey: ''
+    projectId: currentSettings?.projectId || '',
+    region: currentSettings?.region || 'a', // ap-northeast-2로 다시 변경
+    apiKey: currentSettings?.apiKey || ''
   });
+
+  // 컴포넌트 마운트시 현재 설정값 가져오기
+  useEffect(() => {
+    if (currentSettings) {
+      setFormData({
+        projectId: currentSettings.projectId || '',
+        region: currentSettings.region || '',
+        apiKey: currentSettings.apiKey || ''
+      });
+    }
+  }, [currentSettings]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +59,43 @@ export function Login({ onSuccess, onCancel }: LoginProps): JSX.Element {
 
   // 앱 종료 함수
   const handleClose = () => {
-    // 창을 닫는 대신 앱을 종료
-    window.api.quitApp();
+    console.log('Exit button clicked - Attempting to quit app');
+
+    try {
+      // 다양한 방법으로 앱 종료 시도
+
+      // 방법 1: quitApp 함수 호출
+      if (window.api.quitApp) {
+        window.api.quitApp();
+      }
+
+      // 방법 2: 강제 종료 시도 (약간의 딜레이 후)
+      setTimeout(() => {
+        console.log('Fallback 1: Trying forceQuit');
+        try {
+          // any 타입으로 변환하여 타입 체크 우회
+          const api = window.api as any;
+          if (api.forceQuit) {
+            api.forceQuit();
+          }
+        } catch (e) {
+          console.error('Failed to force quit:', e);
+        }
+      }, 300);
+
+      // 방법 3: window.close 시도 (더 긴 딜레이 후)
+      setTimeout(() => {
+        console.log('Fallback 2: Trying window.close()');
+        try {
+          window.close();
+        } catch (e) {
+          console.error('Failed to close window:', e);
+        }
+      }, 600);
+    } catch (error) {
+      console.error('Failed to quit app:', error);
+      alert('Could not exit the application. Please try closing the window manually.');
+    }
   };
 
   // GamePot 플러그인 문서 열기
@@ -65,10 +111,10 @@ export function Login({ onSuccess, onCancel }: LoginProps): JSX.Element {
 
       // Input validation
       if (!formData.projectId.trim()) {
-        throw new Error('Please enter a Project ID.');
+        throw new Error('Please enter Project ID');
       }
       if (!formData.apiKey.trim()) {
-        throw new Error('Please enter a PLUGIN API KEY.');
+        throw new Error('Please enter PLUGIN API KEY');
       }
 
       // API test - Using a virtual API endpoint for this example
@@ -88,42 +134,72 @@ export function Login({ onSuccess, onCancel }: LoginProps): JSX.Element {
         // Network error handling (since the actual API doesn't exist yet, we're treating it as success)
         return { ok: true, json: () => Promise.resolve({ success: true }) };
       });
-      console.log('response', response);
+      console.log('API test response:', response);
+
       // Response handling
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Connection test failed.');
+        throw new Error(errorData.message || 'Connection test failed');
       }
 
       // Check response data
       const result = await response.json();
       if (!result.success) {
-        throw new Error('Authentication failed. Please check your credentials.');
+        throw new Error('Authentication failed. Please check your credentials');
       }
 
       // Save settings on success - keep existing settings and update new info
-      await saveSettings({
-        ...currentSettings,
+      console.log("Saving settings:", {
         projectId: formData.projectId,
         region: formData.region,
         apiKey: formData.apiKey
       });
 
+      try {
+        // Make sure we have a valid settings object to update
+        const settingsToSave = {
+          ...(currentSettings || {}),
+          projectId: formData.projectId,
+          region: formData.region, // 'kr' 값이 사용됨
+          apiKey: formData.apiKey,
+          // Ensure these fields exist with defaults
+          accessKey: currentSettings?.accessKey || '',
+          secretKey: currentSettings?.secretKey || '',
+          s3Bucket: currentSettings?.s3Bucket || '',
+          serverUrl: currentSettings?.serverUrl || 'https://plugin.gamepot.ntruss.com',
+          cdnUrl: currentSettings?.cdnUrl || ''
+        };
+
+        console.log("Full settings to save:", settingsToSave);
+
+        const saveResult = await saveSettings(settingsToSave);
+
+        console.log("Save settings result:", saveResult);
+
+        if (!saveResult) {
+          console.error("Failed to save settings - result was falsy");
+          throw new Error('Settings were not saved properly. Please check your connection and try again.');
+        }
+      } catch (saveError: any) {
+        console.error("Error during save operation:", saveError);
+        throw new Error(`Failed to save settings: ${saveError.message}`);
+      }
+
       // Success message
       toast({
         title: 'Login Successful',
-        description: 'Successfully connected to GamePot Dashboard.',
+        description: 'Successfully connected to GamePot Dashboard',
       });
 
       // Call success callback
       onSuccess();
     } catch (error: any) {
       console.error('Login error:', error);
-      setError(error.message || 'An unknown error occurred.');
+      setError(error.message || 'An unknown error occurred');
 
       toast({
         title: 'Login Failed',
-        description: error.message || 'Connection failed. Please check your credentials.',
+        description: error.message || 'Connection failed. Please check your credentials',
         variant: 'destructive'
       });
     } finally {
@@ -136,7 +212,7 @@ export function Login({ onSuccess, onCancel }: LoginProps): JSX.Element {
       <CardHeader className="pb-3">
         <CardTitle className="text-center text-lg">GamePot Studio</CardTitle>
         <CardDescription className="text-center text-xs">
-          Enter your account information to connect to GamePot Dashboard.
+          Enter your account information to connect to GamePot Dashboard
         </CardDescription>
         <div className="flex justify-center mt-2">
           <Button
@@ -201,20 +277,24 @@ export function Login({ onSuccess, onCancel }: LoginProps): JSX.Element {
         </ScrollArea>
       </CardContent>
 
-      <CardFooter className="flex justify-between pt-2 px-6">
-        <Button variant="outline" onClick={handleClose} disabled={loading} className="text-xs h-8">
-          Close
+      <CardFooter className="flex justify-between pt-3">
+        <Button variant="destructive" onClick={() => {
+          if (window.confirm('Are you sure you want to exit the application?')) {
+            handleClose();
+          }
+        }} size="sm">
+          Exit
         </Button>
-        <Button onClick={testAndSaveConnection} disabled={loading} className="text-xs h-8">
+        <Button onClick={testAndSaveConnection} disabled={loading} size="sm">
           {loading ? (
             <>
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              Testing...
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Connecting...
             </>
           ) : (
             <>
-              <CheckCircle className="mr-1 h-3 w-3" />
-              Confirm
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Connect
             </>
           )}
         </Button>

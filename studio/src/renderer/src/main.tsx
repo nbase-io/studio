@@ -45,6 +45,8 @@ declare global {
       on: (channel: string, listener: (...args: any[]) => void) => any;
       off: (channel: string, listener: (...args: any[]) => void) => any;
       checkForUpdates: () => Promise<void>;
+      quitApp: () => void;
+      forceQuit: () => void;
     }
   }
 }
@@ -125,11 +127,21 @@ function SettingsProvider({ children }: { children: React.ReactNode }) {
   const saveSettings = async (newSettings: Settings): Promise<boolean> => {
     try {
       if (!window.api || !window.api.saveSettings) {
+        console.error('saveSettings: window.api or saveSettings function is not available');
         return false;
       }
 
+      console.log('main.tsx: Saving settings with region:', newSettings.region);
       setSettings(newSettings);
-      const result = await window.api.saveSettings(newSettings as Record<string, unknown>);
+
+      // 명시적인 타입 변환을 사용하여 Record<string, unknown> 타입으로 변환
+      const settingsRecord: Record<string, unknown> = { ...newSettings };
+      const result = await window.api.saveSettings(settingsRecord);
+
+      if (!result.success) {
+        console.error('Settings save failed:', result.error);
+      }
+
       return result.success;
     } catch (error: any) {
       console.error('설정 저장 오류:', error);
