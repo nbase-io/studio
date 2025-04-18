@@ -26,21 +26,39 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from './ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-// 정렬 가능한 필드 타입
+// Sortable field types
 type SortField = 'name' | 'size' | 'lastModified';
 type SortDirection = 'asc' | 'desc';
 
-// 체크박스 컴포넌트
+// Checkbox component
 const SmallCheckbox = React.forwardRef<
   React.ElementRef<typeof Checkbox>,
   React.ComponentPropsWithoutRef<typeof Checkbox>
 >((props, ref) => (
   <Checkbox
     ref={ref}
-    className="h-4 w-4"
+    className="h-4 w-4 bg-white"
     {...props}
   />
 ));
+
+// Checkbox container wrapper (Component for stopping click events and styling)
+const CheckboxContainer: React.FC<{
+  children: React.ReactNode;
+  className?: string;
+  onClick?: (e: React.MouseEvent) => void;
+}> = ({ children, className, onClick }) => (
+  <div
+    className={cn("flex items-center checkbox-container", className)}
+    onClick={(e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      onClick && onClick(e);
+    }}
+  >
+    {children}
+  </div>
+);
 
 interface FileListViewProps {
   loading: boolean;
@@ -71,7 +89,7 @@ const FileListView: React.FC<FileListViewProps> = ({
   onFileDoubleClick,
   onSelectFile
 }) => {
-  // ===== 상태 관리 =====
+  // ===== State Management =====
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [checkedFiles, setCheckedFiles] = useState<string[]>([]);
@@ -80,8 +98,8 @@ const FileListView: React.FC<FileListViewProps> = ({
   const [dragEndIndex, setDragEndIndex] = useState<number | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
 
-  // ===== 유틸리티 함수 =====
-  // 파일 크기 포맷
+  // ===== Utility Functions =====
+  // File size format
   const formatFileSize = (bytes?: number): string => {
     if (bytes === undefined) return '-';
 
@@ -97,23 +115,23 @@ const FileListView: React.FC<FileListViewProps> = ({
     return `${size.toFixed(2)} ${units[unitIndex]}`;
   };
 
-  // 날짜 포맷
+  // Date format
   const formatDate = (date?: Date): string => {
     if (!date) return '-';
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // 파일명 포맷
+  // Filename format
   const getFileName = (key: string) => {
     return key.split('/').pop() || key;
   };
 
-  // 파일 확장자 추출
+  // File extension extraction
   const getFileExtension = (filename: string): string => {
     return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 2);
   };
 
-  // 파일 타입별 색상
+  // File type color
   const getFileIconColor = (filename: string): string => {
     const ext = getFileExtension(filename).toLowerCase();
     switch (ext) {
@@ -129,7 +147,7 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // 파일 확장자에 따른 아이콘
+  // File icon based on extension
   const getFileIcon = (filename: string) => {
     const ext = getFileExtension(filename).toLowerCase();
     const color = getFileIconColor(filename);
@@ -158,7 +176,7 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // 폴더 아이콘 (보다 눈에 띄는 색상과 크기로 개선)
+  // Folder icon (improved with more noticeable color and size)
   const getFolderIcon = (isSelected: boolean, size: 'sm' | 'lg' = 'sm') => {
     const iconProps = {
       className: cn(
@@ -171,22 +189,24 @@ const FileListView: React.FC<FileListViewProps> = ({
     return isSelected ? <FolderOpen {...iconProps} /> : <Folder {...iconProps} />;
   };
 
-  // ===== 상태 관련 함수 =====
-  // 파일 선택 여부 확인
+  // ===== State Related Functions =====
+  // Check if file is selected
   const isFileSelected = (file: S3Object): boolean => {
     return selectedFiles.some(f => f.key === file.key);
   };
 
-  // 체크박스 상태 확인
+  // Check checkbox state
   const isFileChecked = (key: string): boolean => {
     return checkedFiles.includes(key);
   };
 
-  // 모든 파일 선택 여부 확인
-  const isAllSelected = files.length > 0 && selectedFiles.length === files.length;
+  // Check if all files are selected
+  const filteredFiles = files.filter(file => file.key !== '/');
+  const isAllSelected = filteredFiles.length > 0 && selectedFiles.length === filteredFiles.length;
+  const isPartiallySelected = !isAllSelected && selectedFiles.length > 0;
 
-  // ===== 이벤트 핸들러 =====
-  // 정렬 필드 변경
+  // ===== Event Handlers =====
+  // Change sort field
   const handleHeaderClick = (column: SortField) => {
     if (sortField === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -196,7 +216,7 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // 체크박스 토글
+  // Toggle checkbox
   const toggleFileChecked = (key: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -207,21 +227,29 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // 체크박스 변경 핸들러
+  // Checkbox change handler
   const handleCheckboxChange = (file: S3Object, checked: boolean) => {
     onSelectFile(file, checked);
   };
 
-  // 모든 파일 선택/해제 토글
-  const toggleSelectAllFiles = () => {
-    if (isAllSelected) {
-      // 모두 선택된 상태면 모두 해제
+  // Toggle select all files
+  const toggleSelectAllFiles = (checked: boolean) => {
+    console.log('Changing overall selection state:', checked, 'Selectable files count:', sortedFilesWithFoldersFirst.filter(item => item.key !== '/').length);
+    console.log('Currently selected files count:', selectedFiles.length);
+
+    // Target all files/folders except root folder
+    const itemsToSelect = sortedFilesWithFoldersFirst.filter(item => item.key !== '/');
+
+    // If all files are not selected or if some are selected, deselect all
+    if (!checked || isPartiallySelected) {
+      console.log('Deselecting all files');
       selectedFiles.forEach(file => {
         onSelectFile(file, false);
       });
     } else {
-      // 일부만 선택되었거나 아무것도 선택되지 않았으면 모두 선택
-      files.forEach(file => {
+      // If nothing is selected, select all
+      console.log('Selecting all files');
+      itemsToSelect.forEach(file => {
         if (!selectedFiles.some(f => f.key === file.key)) {
           onSelectFile(file, true);
         }
@@ -229,38 +257,47 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // 파일 클릭 핸들러
+  // File click handler
   const handleFileClick = (file: S3Object, event: React.MouseEvent<HTMLDivElement>) => {
-    if (!(event.target as HTMLElement).closest('.checkbox-container')) {
-      if (event.shiftKey && selectedFiles.length > 0) {
-        const lastSelectedFile = selectedFiles[selectedFiles.length - 1];
-        const lastSelectedIndex = sortedFilesWithFoldersFirst.findIndex(f => f.key === lastSelectedFile.key);
-        const currentIndex = sortedFilesWithFoldersFirst.findIndex(f => f.key === file.key);
+    // Stop event processing if checkbox is clicked
+    if ((event.target as HTMLElement).closest('.checkbox-container')) {
+      return;
+    }
 
-        if (lastSelectedIndex !== -1 && currentIndex !== -1) {
-          const start = Math.min(lastSelectedIndex, currentIndex);
-          const end = Math.max(lastSelectedIndex, currentIndex);
+    // Only call onFileClick if the filename area was clicked
+    const nameElement = (event.target as HTMLElement).closest('.file-name-cell');
+    if (!nameElement) {
+      return;
+    }
 
-          for (let i = start; i <= end; i++) {
-            onSelectFile(sortedFilesWithFoldersFirst[i], true);
-          }
-          return;
+    if (event.shiftKey && selectedFiles.length > 0) {
+      const lastSelectedFile = selectedFiles[selectedFiles.length - 1];
+      const lastSelectedIndex = sortedFilesWithFoldersFirst.findIndex(f => f.key === lastSelectedFile.key);
+      const currentIndex = sortedFilesWithFoldersFirst.findIndex(f => f.key === file.key);
+
+      if (lastSelectedIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastSelectedIndex, currentIndex);
+        const end = Math.max(lastSelectedIndex, currentIndex);
+
+        for (let i = start; i <= end; i++) {
+          onSelectFile(sortedFilesWithFoldersFirst[i], true);
         }
-      }
-
-      if (event.ctrlKey || event.metaKey) {
-        const isSelected = selectedFiles.some(f => f.key === file.key);
-        onSelectFile(file, !isSelected);
         return;
       }
+    }
 
-      if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        onFileClick(file, event);
-      }
+    if (event.ctrlKey || event.metaKey) {
+      const isSelected = selectedFiles.some(f => f.key === file.key);
+      onSelectFile(file, !isSelected);
+      return;
+    }
+
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      onFileClick(file, event);
     }
   };
 
-  // 상위 폴더로 이동
+  // Navigate to parent folder
   const navigateToParentFolder = () => {
     if (currentPath === '/' || currentPath === '') return;
 
@@ -278,8 +315,8 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // ===== 드래그 관련 함수 =====
-  // 드래그 시작
+  // ===== Drag-related Functions =====
+  // Start drag
   const handleDragStart = (index: number, event: React.MouseEvent) => {
     if (!(event.ctrlKey || event.metaKey || event.shiftKey)) {
       onClearSelection();
@@ -296,14 +333,14 @@ const FileListView: React.FC<FileListViewProps> = ({
     }
   };
 
-  // 드래그 중
+  // During drag
   const handleDragOver = (index: number) => {
     if (isDragging && dragStartIndex !== null) {
       setDragEndIndex(index);
     }
   };
 
-  // 드래그 종료
+  // End drag
   const handleDragEnd = () => {
     if (isDragging && dragStartIndex !== null && dragEndIndex !== null) {
       const start = Math.min(dragStartIndex, dragEndIndex);
@@ -323,7 +360,7 @@ const FileListView: React.FC<FileListViewProps> = ({
     document.body.style.userSelect = '';
   };
 
-  // 마우스 이벤트 리스너
+  // Mouse event listeners
   useEffect(() => {
     const handleMouseUp = () => {
       if (isDragging) {
@@ -346,8 +383,19 @@ const FileListView: React.FC<FileListViewProps> = ({
     };
   }, [isDragging]);
 
-  // ===== 데이터 처리 =====
-  // 파일 정렬
+  // Reset selection when folder changes
+  useEffect(() => {
+    // Reset all selected files when folder path changes
+    if (selectedFiles.length > 0) {
+      console.log('Resetting file selection state due to folder change');
+      selectedFiles.forEach(file => {
+        onSelectFile(file, false);
+      });
+    }
+  }, [currentPath]);
+
+  // ===== Data Processing =====
+  // Sort files
   const sortFiles = (a: S3Object, b: S3Object): number => {
     let result = 0;
 
@@ -370,7 +418,7 @@ const FileListView: React.FC<FileListViewProps> = ({
     return sortDirection === 'asc' ? result : -result;
   };
 
-  // 폴더를 S3Object로 변환
+  // Convert folders to S3Objects
   const folderObjects: S3Object[] = folders.map(folder => {
     const folderName = folder.split('/').filter(part => part.trim() !== '').pop() || folder;
     return {
@@ -381,20 +429,20 @@ const FileListView: React.FC<FileListViewProps> = ({
     };
   });
 
-  // 정렬된 파일 목록
+  // Sorted file list
   const sortedFiles = [...files].sort(sortFiles);
 
-  // 폴더 정렬 (항상 이름순)
+  // Sort folders (always by name)
   const sortedFolders = [...folderObjects].sort((a, b) => {
     const nameA = a.displayName || a.key.split('/').filter(part => part.trim() !== '').pop() || a.key;
     const nameB = b.displayName || b.key.split('/').filter(part => part.trim() !== '').pop() || b.key;
     return nameA.localeCompare(nameB);
   });
 
-  // 파일과 폴더 결합 (폴더 먼저)
+  // Combine files and folders (folders first)
   const sortedFilesWithFoldersFirst = [...sortedFolders, ...sortedFiles];
 
-  // ===== 렌더링 =====
+  // ===== Rendering =====
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -410,20 +458,21 @@ const FileListView: React.FC<FileListViewProps> = ({
           <thead className="bg-gray-50">
             <tr>
               <th className="w-12 px-1 py-1 text-left">
-                <div className="flex items-center">
+                <CheckboxContainer className="checkbox-container">
                   <Checkbox
-                    checked={isAllSelected}
-                    onCheckedChange={toggleSelectAllFiles}
-                    className="checkbox-container"
+                    checked={isAllSelected || isPartiallySelected}
+                    onCheckedChange={(checked) => toggleSelectAllFiles(!!checked)}
+                    className="h-4 w-4"
+                    data-state={isAllSelected || isPartiallySelected ? "checked" : "unchecked"}
                   />
-                </div>
+                </CheckboxContainer>
               </th>
               <th
                 className="w-1/2 px-1 py-1 text-left cursor-pointer"
                 onClick={() => handleHeaderClick('name')}
               >
                 <div className="flex items-center">
-                  <span className="text-xs">이름</span>
+                  <span className="text-xs">Name</span>
                   {sortField === 'name' && (
                     sortDirection === 'asc' ?
                     <ChevronUp className="ml-1 h-3 w-3" /> :
@@ -436,7 +485,7 @@ const FileListView: React.FC<FileListViewProps> = ({
                 onClick={() => handleHeaderClick('size')}
               >
                 <div className="flex items-center">
-                  <span className="text-xs">크기</span>
+                  <span className="text-xs">Size</span>
                   {sortField === 'size' && (
                     sortDirection === 'asc' ?
                     <ChevronUp className="ml-1 h-3 w-3" /> :
@@ -449,7 +498,7 @@ const FileListView: React.FC<FileListViewProps> = ({
                 onClick={() => handleHeaderClick('lastModified')}
               >
                 <div className="flex items-center">
-                  <span className="text-xs">수정일</span>
+                  <span className="text-xs">Modified</span>
                   {sortField === 'lastModified' && (
                     sortDirection === 'asc' ?
                     <ChevronUp className="ml-1 h-3 w-3" /> :
@@ -460,7 +509,7 @@ const FileListView: React.FC<FileListViewProps> = ({
             </tr>
           </thead>
           <tbody>
-            {/* 상위 폴더로 이동 */}
+            {/* Navigate to parent folder */}
             {currentPath !== '/' && currentPath !== '' && (
               <tr
                 className="hover:bg-gray-100 cursor-pointer"
@@ -476,6 +525,7 @@ const FileListView: React.FC<FileListViewProps> = ({
               </tr>
             )}
             {sortedFilesWithFoldersFirst.map((item, index) => {
+              if(item.key === '/') return null;
               const isSelected = selectedFiles.some(f => f.key === item.key);
               const fileName = item.displayName || getFileName(item.key);
               const isInDragRange = isDragging && dragStartIndex !== null && dragEndIndex !== null &&
@@ -496,30 +546,28 @@ const FileListView: React.FC<FileListViewProps> = ({
                   style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
                 >
                   <td className="px-1 py-1">
-                    <div
-                      className="flex items-center checkbox-container"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }}
-                    >
+                    <CheckboxContainer className="checkbox-container">
                       <SmallCheckbox
                         checked={isSelected}
                         onCheckedChange={(checked) => handleCheckboxChange(item, !!checked)}
                       />
-                    </div>
+                    </CheckboxContainer>
                   </td>
-                  <td className="px-1 py-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                  <td className="px-1 py-1 overflow-hidden text-ellipsis whitespace-nowrap file-name-cell">
                     <div className="flex items-center">
                       {item.type === 'folder' ? (
-                        getFolderIcon(isSelected, 'sm')
+                        <div className="flex-shrink-0 mr-2">
+                          {getFolderIcon(isSelected, 'sm')}
+                        </div>
                       ) : (
-                        React.cloneElement(getFileIcon(item.key), { className: `ml-0 mr-1 h-4 w-4` })
+                        <div className="flex-shrink-0 mr-2">
+                          {React.cloneElement(getFileIcon(item.key), { className: `h-4 w-4` })}
+                        </div>
                       )}
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="text-xs">{fileName}</span>
+                            <span className="text-xs truncate block">{fileName}</span>
                           </TooltipTrigger>
                           <TooltipContent>
                             <p className="text-xs">{fileName}</p>
@@ -531,7 +579,7 @@ const FileListView: React.FC<FileListViewProps> = ({
                   <td className="px-1 py-1 text-xs">
                     {item.type === 'file' ? formatFileSize(item.size) : '-'}
                   </td>
-                  <td className="px-1 py-1 text-xs">
+                  <td className="px-1 py-1 text-xs whitespace-nowrap overflow-hidden text-ellipsis">
                     {item.lastModified ? formatDate(item.lastModified) : '-'}
                   </td>
                 </tr>
@@ -542,11 +590,11 @@ const FileListView: React.FC<FileListViewProps> = ({
       </div>
     );
   } else {
-    // 그리드 뷰
+    // Grid view
     return (
       <div className="w-full h-full p-2 overflow-auto">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {/* 상위 폴더로 이동 */}
+          {/* Navigate to parent folder */}
           {currentPath !== '/' && currentPath !== '' && (
             <div
               key="parent-folder"
@@ -560,6 +608,7 @@ const FileListView: React.FC<FileListViewProps> = ({
             </div>
           )}
           {sortedFilesWithFoldersFirst.map((item, index) => {
+            if(item.key === '/') return null;
             const isSelected = selectedFiles.some(f => f.key === item.key);
             const fileName = item.displayName || getFileName(item.key);
             const isInDragRange = isDragging && dragStartIndex !== null && dragEndIndex !== null &&
@@ -579,38 +628,34 @@ const FileListView: React.FC<FileListViewProps> = ({
                 onMouseOver={() => isDragging && handleDragOver(index)}
                 style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
               >
-                <div className="relative w-full flex justify-center">
-                  <div
-                    className="absolute top-0 left-0 checkbox-container"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                    }}
-                  >
+                <div className="relative w-full flex flex-col items-center">
+                  <CheckboxContainer className="absolute top-0 left-0 z-10 checkbox-container">
                     <SmallCheckbox
                       checked={isSelected}
                       onCheckedChange={(checked) => handleCheckboxChange(item, !!checked)}
                     />
+                  </CheckboxContainer>
+                  <div className="flex-shrink-0 mb-2 relative file-name-cell">
+                    {item.type === 'folder' ? (
+                      getFolderIcon(isSelected, 'lg')
+                    ) : (
+                      React.cloneElement(getFileIcon(item.key), { className: `h-12 w-12` })
+                    )}
                   </div>
-                  {item.type === 'folder' ? (
-                    getFolderIcon(isSelected, 'lg')
-                  ) : (
-                    React.cloneElement(getFileIcon(item.key), { className: `h-12 w-12` })
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="mt-1 text-center text-xs truncate w-full max-w-[90px] file-name-cell">{fileName}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-xs">{fileName}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  {item.type === 'file' && (
+                    <span className="text-xs text-gray-500 mt-1">{formatFileSize(item.size)}</span>
                   )}
                 </div>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="mt-1 text-center text-xs truncate w-full">{fileName}</span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p className="text-xs">{fileName}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                {item.type === 'file' && (
-                  <span className="text-xs text-gray-500 mt-1">{formatFileSize(item.size)}</span>
-                )}
               </div>
             );
           })}

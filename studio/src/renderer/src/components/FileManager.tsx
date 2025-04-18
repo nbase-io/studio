@@ -19,45 +19,6 @@ import FolderTreeView, { S3Object } from './FolderTreeView'
 import FileListView from './FileListView'
 import FileToolbar from './FileToolbar'
 
-// window.api 타입 정의
-declare global {
-  interface Window {
-    api: {
-      loadSettings: () => Promise<Record<string, unknown>>;
-      saveSettings: (settings: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
-      getS3Config: () => Promise<{
-        bucket: string;
-        region: string;
-        accessKeyId: string;
-        secretAccessKey: string;
-        cdnUrl?: string;
-        endpointUrl?: string;
-      } | null>;
-      uploadFileToS3: (params: {
-        filePath: string;
-        bucket: string;
-        key: string;
-        accessKeyId: string;
-        secretAccessKey: string;
-        region: string;
-      }) => Promise<{ success: boolean; location?: string; error?: string }>;
-      listS3Files: (params: {
-        bucket: string;
-        prefix?: string;
-      }) => Promise<{ files: any[]; folders: string[]; error?: string }>;
-      selectFile: (options?: any) => Promise<string[]>;
-      createTempFile: (params: { fileName: string; totalSize: number }) => Promise<string | null>;
-      appendToTempFile: (params: { filePath: string; buffer: ArrayBuffer; offset: number }) => Promise<{ success: boolean; error?: string }>;
-      deleteTempFile: (params: { filePath: string }) => Promise<{ success: boolean; error?: string }>;
-      deleteFileFromS3: (params: any) => Promise<{ success: boolean; error?: string }>;
-
-      // 이벤트 리스너 관리
-      on: (channel: string, listener: (...args: any[]) => void) => any;
-      off: (channel: string, listener: (...args: any[]) => void) => any;
-    };
-  }
-}
-
 // 파일 업로드 상태 인터페이스
 interface FileUploadStatus {
   id: string;
@@ -98,9 +59,9 @@ const FileManager: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [s3Objects, setS3Objects] = useState<S3Object[]>([]);
   const [fileList, setFileList] = useState<S3Object[]>([]);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>('');
-  const [expandedFolders, setExpandedFolders] = useState<string[]>([]);
-  const [currentPath, setCurrentPath] = useState<string>('');
+  const [selectedFolder, setSelectedFolder] = useState<string | null>('/');
+  const [expandedFolders, setExpandedFolders] = useState<string[]>(['/']);
+  const [currentPath, setCurrentPath] = useState<string>('/');
   const [files, setFiles] = useState<S3Object[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<S3Object[]>([]);
@@ -162,7 +123,7 @@ const FileManager: React.FC = () => {
             accessKeyId: config.accessKeyId ? '***' : '설정되지 않음', // 보안을 위해 실제 키는 로그에 출력하지 않음
             secretKeySet: config.secretAccessKey ? true : false,
             cdnUrl: config.cdnUrl || '설정되지 않음',
-            endpointUrl: config.endpointUrl || '설정되지 않음'
+            endpointUrl: (config as any).endpointUrl || '설정되지 않음'
           });
           return config;
         } else {
@@ -193,7 +154,7 @@ const FileManager: React.FC = () => {
           accessKeyId: parsedSettings.accessKey || '',
           secretAccessKey: parsedSettings.secretKey || '',
           cdnUrl: parsedSettings.cdnUrl || '',
-          endpointUrl: parsedSettings.endpointUrl || ''
+          endpointUrl: (parsedSettings as any).endpointUrl || ''
         };
       } else {
         console.warn('[S3Config] 로컬 스토리지에 설정이 없음');
@@ -258,10 +219,10 @@ const FileManager: React.FC = () => {
 
         console.log('[S3] 실제 S3 서버에서 데이터 가져오기 시작');
         // 실제 S3 서버에서 데이터 가져오기
-        if (window.api && typeof window.api.listS3Files === 'function') {
+        if (window.api && typeof (window.api as any).listS3Files === 'function') {
           try {
             console.log('[S3] API 호출: listS3Files, 버킷:', s3Config.bucket, '프리픽스: ""(루트)');
-            const result = await window.api.listS3Files({
+            const result = await (window.api as any).listS3Files({
               bucket: s3Config.bucket,
               prefix: '' // 루트 디렉토리
             });
@@ -279,30 +240,48 @@ const FileManager: React.FC = () => {
               폴더수: result.folders?.length || 0
             });
 
-            // 결과 파싱
-            const rootFolder = '/'
-            const parsedFiles: S3Object[] = (result.files || []).map(file => ({
-              key: file.key,
-              size: file.size,
-              lastModified: file.lastModified,
-              folder: rootFolder,
-              selected: false
-            }));
 
             // 폴더 경로 정규화 (중복 슬래시 제거)
-            const parsedFolders = (result.folders || []).map(folder => {
-              // 중복 슬래시 제거
-              return folder.replace(/\/+/g, '/');
-            });
+            const normalizedFolders = (result.folders || []).map(folder =>
+              folder.replace(/\/+/g, '/')
+            );
 
-            console.log('[S3] 파싱된 폴더 목록:', parsedFolders);
+            console.log('[S3] 정규화된 폴더 목록:', normalizedFolders);
 
-            // 파일 데이터 상태 업데이트
-            console.log('[S3] 파일 데이터 상태 업데이트 시작');
-            setS3Objects(parsedFiles);
-            setFolders(parsedFolders);
+            // 루트 폴더 생성
+            const rootFolder: S3Object = {
+              key: '/',
+              displayName: '/',
+              type: 'folder',
+              children: []
+            };
+
+            // 최상위 폴더 객체 생성 (1단계 깊이)
+            const topLevelFolders = normalizedFolders
+              .filter(f => f.split('/').filter(Boolean).length === 1)
+              .map(folderPath => {
+                const folderName = folderPath.split('/').filter(Boolean)[0];
+                return {
+                  key: folderPath,
+                  displayName: folderName,
+                  type: 'folder' as const,
+                  children: []
+                };
+              });
+
+            // 루트 폴더에 최상위 폴더 설정
+            rootFolder.children = topLevelFolders;
+
+            // 폴더와 파일 목록 설정
+            setS3Objects([rootFolder]); // 루트 폴더만 최상위로 설정
+            setFolders(normalizedFolders);
             setCurrentPath('/');
-            console.log('[S3] 초기 데이터 로드 완료, 현재 경로: /');
+
+            // 기본적으로 루트 폴더 확장
+            setExpandedFolders(['/']);
+            setSelectedFolder('/');
+
+            console.log('[S3] 초기 데이터 로드 완료, 현재 경로: /', rootFolder);
           } catch (error) {
             console.error('[S3] 데이터 가져오기 중 예외 발생:', error);
             showErrorDialog('S3 연결 오류', `오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`);
@@ -333,7 +312,7 @@ const FileManager: React.FC = () => {
       const s3Config = await getS3Config();
       console.log('[S3] 설정 로드 완료, 버킷:', s3Config.bucket);
 
-      if (window.api && typeof window.api.listS3Files === 'function') {
+      if (window.api && typeof (window.api as any).listS3Files === 'function') {
         // S3 서버에서 폴더 내용 가져오기
         // 'root' 키는 실제 S3 경로가 아니므로 빈 문자열로 대체
         const prefix = folderKey === '/' ? '' : folderKey;
@@ -345,7 +324,7 @@ const FileManager: React.FC = () => {
 
         try {
           console.log('[S3] API 호출: listS3Files, 버킷:', s3Config.bucket, '프리픽스:', normalizedPrefix);
-          const result = await window.api.listS3Files({
+          const result = await (window.api as any).listS3Files({
             bucket: s3Config.bucket,
             prefix: normalizedPrefix
           });
@@ -365,7 +344,7 @@ const FileManager: React.FC = () => {
           });
 
           // 파일 목록 처리
-          const newFiles = (result.files || [])
+          const newFiles: S3Object[] = (result.files || [])
             .filter(file => {
               // 폴더 자체는 제외 (일부 S3 구현에서는 폴더도 객체로 반환)
               // 키가 prefix와 같은 경우 제외 (자기 자신)
@@ -375,65 +354,81 @@ const FileManager: React.FC = () => {
               key: file.key,
               size: file.size,
               lastModified: file.lastModified,
-              folder: folderKey,
-              selected: false
+              type: 'file' as const
             }));
 
           console.log('[S3] 파싱된 파일 목록:', newFiles.map(f => ({ key: f.key, size: f.size })));
 
           // 폴더 목록 처리
           // 폴더 경로 정규화 (중복 슬래시 제거)
-          const newFolders = (result.folders || []).map(folder => {
-            // 중복 슬래시 제거
-            return folder.replace(/\/+/g, '/');
-          });
+          const newFolders = (result.folders || []).map(folder =>
+            folder.replace(/\/+/g, '/')
+          );
 
           console.log('[S3] 파싱된 폴더 목록:', newFolders);
 
-          // 상태 업데이트를 위한 새 객체 생성
-          setS3Objects(prev => {
-            console.log('[S3] 파일 데이터 상태 업데이트 시작');
+          // 현재 폴더 경로의 직계 하위 폴더만 필터링
+          const directChildFolders = newFolders.filter(folder => {
+            if (folderKey === '/') {
+              // 루트 폴더의 경우, 첫 번째 수준의 폴더만 선택
+              const segments = folder.split('/').filter(Boolean);
+              return segments.length === 1;
+            } else {
+              // 일반 폴더의 경우, folderKey 제외하고 한 단계 더 깊은 폴더만 선택
+              const folderKeySegments = folderKey.split('/').filter(Boolean);
+              const segments = folder.split('/').filter(Boolean);
 
-            // 폴더 내 파일 목록 업데이트
-            const newObjects = [
-              ...prev.filter(obj => obj.folder !== folderKey), // 현재 폴더 외의 파일들 유지
-              ...newFiles // 새로 로드한 파일들 추가
-            ];
+              // folderKey의 직계 하위 폴더만 포함
+              return segments.length === folderKeySegments.length + 1 &&
+                folder.startsWith(folderKey === '/' ? '' : folderKey);
+            }
+          });
 
-            // 폴더 구조 업데이트
-            const newFolders = {
-              ...prev.folders,
-              [folderKey]: {
-                expanded: true,
-                children: result.folders.map(folder => {
-                  // 폴더 이름 추출 (마지막 / 앞까지의 문자열)
-                  const folderName = folder.endsWith('/')
-                    ? folder.substring(0, folder.length - 1)
-                    : folder;
+          console.log('[S3] 직계 하위 폴더:', directChildFolders);
 
-                  // 폴더가 정규화되었는지 확인
-                  if (folder !== folderName + '/') {
-                    console.warn('[S3] 폴더 경로 정규화 이슈:', { 원본: folder, 정규화후: folderName + '/' });
-                  }
-                  return folderName;
-                })
-              }
-            };
-
-            console.log('[S3] 업데이트된 폴더 구조:', {
-              폴더수: Object.keys(newFolders).length,
-              현재폴더: folderKey,
-              하위폴더수: newFolders[folderKey]?.children.length || 0
-            });
-
+          // 직계 하위 폴더 객체 생성
+          const childFolderObjects: S3Object[] = directChildFolders.map(folder => {
+            const folderSegments = folder.split('/').filter(Boolean);
+            const folderName = folderSegments[folderSegments.length - 1];
             return {
-              objects: newObjects,
-              folders: newFolders
+              key: folder,
+              displayName: folderName,
+              type: 'folder' as const,
+              children: [] // 초기에는 빈 하위 폴더
             };
           });
 
-          // 현재 경로 설정
+          // 상태 업데이트
+          setFiles(newFiles);
+          setFolders(directChildFolders);
           setCurrentPath(folderKey);
+
+          // 트리 상태 업데이트
+          setS3Objects(prev => {
+            // 폴더 찾고 업데이트하는 재귀 함수
+            const updateFolderChildren = (folders: S3Object[]): S3Object[] => {
+              return folders.map(folder => {
+                if (folder.key === folderKey) {
+                  // 현재 폴더 찾음, 하위 폴더 업데이트
+                  return {
+                    ...folder,
+                    children: childFolderObjects
+                  };
+                } else if (folder.children && folder.children.length > 0) {
+                  // 재귀적으로 하위 폴더 검색
+                  return {
+                    ...folder,
+                    children: updateFolderChildren(folder.children)
+                  };
+                }
+                return folder;
+              });
+            };
+
+            // 트리 업데이트 적용
+            return updateFolderChildren(prev);
+          });
+
           console.log('[S3] 폴더 내용 로드 완료, 현재 경로:', folderKey);
         } catch (error) {
           console.error('[S3] 폴더 내용 가져오기 중 예외 발생:', error);
@@ -654,7 +649,7 @@ const FileManager: React.FC = () => {
 
       // S3에 업로드
       console.log('[Upload] S3 업로드 시작');
-      const uploadResult = await window.api.uploadFileToS3({
+      const uploadResult = await (window.api as any).uploadFileToS3({
         filePath: tempFilePath,
         bucket: s3Config.bucket,
         key: s3Key,
@@ -667,7 +662,7 @@ const FileManager: React.FC = () => {
       if (uploadResult && uploadResult.success) {
         console.log(`[Upload] 파일 업로드 성공:`, {
           파일명: file.name,
-          S3위치: uploadResult.location,
+          S3위치: (uploadResult as any).location,
           키: s3Key
         });
 
@@ -692,7 +687,7 @@ const FileManager: React.FC = () => {
           description: `${file.name} 파일이 업로드되었습니다.`
         });
 
-        return uploadResult.location;
+        return (uploadResult as any).location;
       } else {
         console.error('[Upload] 파일 업로드 실패:', uploadResult?.error || '알 수 없는 오류');
         throw new Error(uploadResult?.error || '파일 업로드에 실패했습니다.');
@@ -747,8 +742,8 @@ const FileManager: React.FC = () => {
       // 활성 업로드 작업 취소 요청
       setIsCancelling(true);
 
-      if (window.api && typeof window.api.cancelUpload === 'function') {
-        const result = await window.api.cancelUpload();
+      if (window.api && typeof (window.api as any).cancelUpload === 'function') {
+        const result = await (window.api as any).cancelUpload();
 
         if (result.success) {
           console.log('업로드 취소 성공');
@@ -805,25 +800,40 @@ const FileManager: React.FC = () => {
 
   // 파일 클릭 핸들러
   const handleFileClick = (file: S3Object, event?: React.MouseEvent) => {
-    // 클릭된 파일이 이미 선택되어 있는지 확인
-    if (selectedFile && selectedFile.key === file.key) {
-      // 이미 선택된 파일을 다시 클릭하면 선택 해제
-      setSelectedFile(null);
-      setSelectedFiles(selectedFiles.filter(f => f.key !== file.key));
-    } else {
-      // Ctrl 키를 누르지 않은 경우 기존 선택 초기화
-      if (!event || !(event.ctrlKey || event.metaKey)) {
-        setSelectedFiles([file]);
-      } else {
-        // Ctrl 키를 누른 경우 해당 파일을 선택 목록에 추가
-        const isAlreadySelected = selectedFiles.some(f => f.key === file.key);
-        if (isAlreadySelected) {
-          setSelectedFiles(selectedFiles.filter(f => f.key !== file.key));
-        } else {
-          setSelectedFiles([...selectedFiles, file]);
+    // 체크박스 영역을 클릭한 경우 동작하지 않도록 (체크박스 자체 이벤트가 처리)
+    if (event && (event.target as HTMLElement).closest('.checkbox-container')) {
+      console.log('[DEBUG] 체크박스 영역 클릭, 파일 클릭 이벤트 중단');
+      return;
+    }
+
+    console.log('[DEBUG] 파일 클릭:', file.key);
+
+    // Ctrl/Cmd 키를 누른 경우 다중 선택 처리
+    if (event && (event.ctrlKey || event.metaKey)) {
+      const isAlreadySelected = selectedFiles.some(f => f.key === file.key);
+
+      if (isAlreadySelected) {
+        // 이미 선택된 파일을 다시 클릭하면 선택 해제
+        setSelectedFiles(selectedFiles.filter(f => f.key !== file.key));
+        if (selectedFile?.key === file.key) {
+          setSelectedFile(null);
         }
+      } else {
+        // 선택 목록에 추가
+        setSelectedFiles([...selectedFiles, file]);
+        setSelectedFile(file);
       }
-      setSelectedFile(file);
+    } else {
+      // 일반 클릭 - 단일 선택
+      if (selectedFile && selectedFile.key === file.key) {
+        // 이미 선택된 파일을 다시 클릭하면 선택 해제
+        setSelectedFile(null);
+        setSelectedFiles([]);
+      } else {
+        // 새 파일 선택
+        setSelectedFile(file);
+        setSelectedFiles([file]);
+      }
     }
   };
 
@@ -833,16 +843,23 @@ const FileManager: React.FC = () => {
     handleDownload(file);
   };
 
-  // 파일 선택 토글 핸들러
+  // 파일 선택 토글 핸들러 (체크박스 사용)
   const handleSelectFile = (file: S3Object, selected: boolean) => {
+    console.log('[DEBUG] 체크박스 변경:', file.key, selected);
+
     if (selected) {
       // 파일 선택 추가
       if (!selectedFiles.some(f => f.key === file.key)) {
-        setSelectedFiles([...selectedFiles, file]);
+        setSelectedFiles(prev => [...prev, file]);
       }
     } else {
       // 파일 선택 해제
-      setSelectedFiles(selectedFiles.filter(f => f.key !== file.key));
+      setSelectedFiles(prev => prev.filter(f => f.key !== file.key));
+
+      // 현재 선택된 파일이 체크 해제되었다면 선택 해제
+      if (selectedFile?.key === file.key) {
+        setSelectedFile(null);
+      }
     }
   };
 
@@ -882,12 +899,12 @@ const FileManager: React.FC = () => {
       // 실제 S3 파일 목록 가져오기
       const s3Config = await getS3Config();
 
-      if (window.api && typeof window.api.listS3Files === 'function') {
+      if (window.api && typeof (window.api as any).listS3Files === 'function') {
         // 'root' 키는 실제 S3 경로가 아니므로 빈 문자열로 대체
         const prefix = currentPath === '/' ? '' : currentPath;
         console.log('[DEBUG] loadFiles - Using prefix:', prefix);
 
-        const result = await window.api.listS3Files({
+        const result = await (window.api as any).listS3Files({
           bucket: s3Config.bucket,
           prefix
         });
@@ -928,12 +945,12 @@ const FileManager: React.FC = () => {
   const confirmDelete = async () => {
     try {
       const s3Config = await getS3Config();
-      const deleteResults = [];
+      const deleteResults: Array<{file: S3Object, success: boolean, error?: string}> = [];
 
-      if (window.api && typeof window.api.deleteFileFromS3 === 'function') {
+      if (window.api && typeof (window.api as any).deleteFileFromS3 === 'function') {
         // 모든 파일에 대해 삭제 실행
         for (const file of filesToDelete) {
-          const result = await window.api.deleteFileFromS3({
+          const result = await (window.api as any).deleteFileFromS3({
             bucket: s3Config.bucket,
             key: file.key
           });
@@ -953,7 +970,7 @@ const FileManager: React.FC = () => {
           toast({
             title: successCount === 1 ? "파일 삭제 완료" : `${successCount}개 파일 삭제 완료`,
             description: successCount === 1
-              ? `${filesToDelete[0]?.key.split('/').pop()} 파일이 삭제되었습니다.`
+              ? `${filesToDelete[0]?.displayName || filesToDelete[0]?.key.split('/').pop() || filesToDelete[0]?.key} 파일이 삭제되었습니다.`
               : `${successCount}개의 파일이 삭제되었습니다.`,
           });
 
@@ -1008,8 +1025,8 @@ const FileManager: React.FC = () => {
       pathParts.pop(); // 기존 파일명 제거
       const newPath = [...pathParts, newName].join('/');
 
-      if (window.api && typeof window.api.renameFileInS3 === 'function') {
-        const result = await window.api.renameFileInS3({
+      if (window.api && typeof (window.api as any).renameFileInS3 === 'function') {
+        const result = await (window.api as any).renameFileInS3({
           bucket: s3Config.bucket,
           oldKey: file.key,
           newKey: newPath
@@ -1052,12 +1069,12 @@ const FileManager: React.FC = () => {
     try {
       const s3Config = await getS3Config();
 
-      if (window.api && typeof window.api.downloadFileFromS3 === 'function') {
+      if (window.api && typeof (window.api as any).downloadFileFromS3 === 'function') {
         // 파일 이름을 키에서 추출
         const fileName = file.key.split('/').pop();
 
         // 사용자에게 저장 위치 선택 요청 - 파일명을 defaultPath로 전달
-        const saveResult = await window.api.selectSaveLocation({
+        const saveResult = await (window.api as any).selectSaveLocation({
           defaultPath: fileName
         });
 
@@ -1071,7 +1088,7 @@ const FileManager: React.FC = () => {
           description: `${fileName} 파일을 다운로드합니다...`,
         });
 
-        const result = await window.api.downloadFileFromS3({
+        const result = await (window.api as any).downloadFileFromS3({
           bucket: s3Config.bucket,
           key: file.key,
           destination: saveResult.filePath,
@@ -1565,11 +1582,11 @@ const FileManager: React.FC = () => {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>파일 삭제 확인</DialogTitle>
+            <DialogTitle>Delete File Confirmation</DialogTitle>
             <DialogDescription>
               {filesToDelete.length === 1
-                ? `${filesToDelete[0]?.key.split('/').pop()} 파일을 삭제하시겠습니까?`
-                : `선택한 ${filesToDelete.length}개 파일을 삭제하시겠습니까?`}
+                ? `Are you sure you want to delete "${filesToDelete[0]?.displayName || filesToDelete[0]?.key.split('/').pop() || filesToDelete[0]?.key}"?`
+                : `Are you sure you want to delete ${filesToDelete.length} selected files?`}
             </DialogDescription>
           </DialogHeader>
 
@@ -1579,7 +1596,7 @@ const FileManager: React.FC = () => {
                 {filesToDelete.map((file) => (
                   <div key={file.key} className="flex items-center text-sm border-b py-1 last:border-0">
                     <FileIcon className="h-3.5 w-3.5 mr-2 text-gray-500" />
-                    <span className="truncate">{file.key.split('/').pop()}</span>
+                    <span className="truncate">{file.displayName || file.key.split('/').pop() || file.key}</span>
                   </div>
                 ))}
               </div>
@@ -1592,14 +1609,14 @@ const FileManager: React.FC = () => {
               variant="outline"
               onClick={() => setDeleteDialogOpen(false)}
             >
-              취소
+              Cancel
             </Button>
             <Button
               type="button"
               variant="destructive"
               onClick={confirmDelete}
             >
-              삭제
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

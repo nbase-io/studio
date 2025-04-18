@@ -25,6 +25,13 @@ interface ThemeConfig {
   titleColor: string
 }
 
+interface S3Config {
+  bucket: string
+  region: string
+  accessKeyId: string
+  secretAccessKey: string
+}
+
 const defaultTheme: ThemeConfig = {
   colors: {
     primary: '#0070f3',
@@ -50,7 +57,45 @@ function DesignEditor(): JSX.Element {
   const [isDragging, setIsDragging] = useState<boolean>(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number>(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // S3 설정 가져오기 함수
+  const getS3Config = async () => {
+    try {
+      if (!window.api || typeof window.api.getS3Config !== 'function') {
+        console.error('window.api.getS3Config 함수가 정의되지 않았습니다.');
+
+        // localStorage에서 정보 가져오기 (대체 방법)
+        const settings = JSON.parse(localStorage.getItem('settings') || '{}');
+        return {
+          bucket: settings.bucketName || 'my-default-bucket',
+          accessKeyId: settings.accessKey || '',
+          secretAccessKey: settings.secretKey || '',
+          region: settings.region || 'ap-northeast-2',
+          cdnUrl: settings.cdnUrl || ''
+        };
+      }
+
+      const config = await window.api.getS3Config();
+      if (!config) {
+        throw new Error('S3 설정을 가져오지 못했습니다');
+      }
+
+      return config;
+    } catch (error) {
+      console.error('S3 설정 가져오기 오류:', error);
+      toast({
+        title: 'S3 설정 오류',
+        description: '설정을 가져오는 중 오류가 발생했습니다. 기본값을 사용합니다.'
+      });
+
+      // 오류 발생 시 기본값 반환
+      return {
+
+      };
+    }
+  };
 
   const updateThemeColors = (key: keyof ThemeColors, value: string) => {
     setTheme(prev => ({
@@ -141,7 +186,197 @@ function DesignEditor(): JSX.Element {
     fileInputRef.current?.click()
   }
 
+  const generateMD5Hash = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = async function(event) {
+        if (!event.target || !event.target.result) {
+          reject(new Error('파일 읽기 실패'))
+          return
+        }
+
+        try {
+          const buffer = event.target.result as ArrayBuffer
+          const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer)
+          const hashArray = Array.from(new Uint8Array(hashBuffer))
+          const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+          resolve(hashHex)
+        } catch (error) {
+          reject(error)
+        }
+      }
+
+      reader.onerror = function() {
+        reject(new Error('파일 읽기 실패'))
+      }
+
+      reader.readAsArrayBuffer(file)
+    })
+  }
+
+  const uploadFileToS3 = async (file: File): Promise<{ url: string, md5: string }> => {
+    let tempFilePath: string | null = null
+
+    try {
+      console.log('파일 업로드 시작:', file.name)
+      setIsUploading(true)
+      const s3Config = await getS3Config()
+      if (!s3Config) {
+        console.error('S3 설정을 가져올 수 없습니다')
+        toast({
+          title: 'S3 설정 오류',
+          description: 'S3 설정을 가져올 수 없습니다',
+          variant: "destructive"
+        })
+        setIsUploading(false)
+        throw new Error('S3 설정을 가져올 수 없습니다')
+      }
+
+      const { bucket, region, accessKeyId, secretAccessKey } = s3Config
+      console.log('S3 설정 로드 완료:', { bucket, region })
+
+      // 랜덤 4자리 문자열 생성
+      const randomPrefix = Math.random().toString(36).substring(2, 6)
+
+      // 파일 이름에서 확장자 추출
+      const originalName = file.name
+      const fileExtension = originalName.includes('.') ?
+        originalName.substring(originalName.lastIndexOf('.')) : ''
+      const fileNameWithoutExt = originalName.includes('.') ?
+        originalName.substring(0, originalName.lastIndexOf('.')) : originalName
+
+      // 새 파일 이름 생성 (xxxx_파일명.확장자)
+      const newFileName = `${randomPrefix}_${fileNameWithoutExt}${fileExtension}`
+      const key = `themes/${newFileName}`
+      console.log('새 파일 이름 생성:', { originalName, newFileName, key })
+
+      // 임시 파일 생성
+      console.log('임시 파일 생성 시작')
+      tempFilePath = await window.api.createTempFile({
+        fileName: file.name,
+        totalSize: file.size
+      })
+
+      if (!tempFilePath) {
+        console.error('임시 파일 생성 실패')
+        toast({
+          title: '파일 생성 오류',
+          description: '임시 파일 생성 실패',
+          variant: "destructive"
+        })
+        setIsUploading(false)
+        throw new Error('임시 파일 생성 실패')
+      }
+      console.log('임시 파일 생성 완료:', tempFilePath)
+
+      // 파일을 한 번에 업로드
+      console.log('파일 버퍼 생성 시작')
+      const buffer = await file.arrayBuffer()
+      const result = await window.api.appendToTempFile({
+        filePath: tempFilePath,
+        buffer,
+        offset: 0
+      })
+
+      if (!result.success) {
+        console.error('파일 업로드 실패:', result.error)
+        toast({
+          title: '파일 업로드 오류',
+          description: `파일 업로드 실패: ${result.error}`,
+          variant: "destructive"
+        })
+        setIsUploading(false)
+        throw new Error(result.error)
+      }
+      console.log('파일 버퍼 생성 완료')
+
+      // 진행률 표시 (50%)
+      setUploadProgress(50)
+
+      // 임시 파일을 S3에 업로드
+      console.log('S3 업로드 시작')
+      const uploadResult = await window.api.uploadFileToS3({
+        filePath: tempFilePath,
+        bucket,
+        key,
+        accessKeyId,
+        secretAccessKey,
+        region
+      })
+
+      if (!uploadResult.success) {
+        console.error('S3 업로드 실패:', uploadResult.error)
+        toast({
+          title: 'S3 업로드 오류',
+          description: `S3 업로드 실패: ${uploadResult.error}`,
+          variant: "destructive"
+        })
+        setIsUploading(false)
+        throw new Error(uploadResult.error)
+      }
+
+      // S3 업로드 완료 시 진행률 100%로 설정
+      setUploadProgress(100)
+      console.log('S3 업로드 완료:', { file: file.name, key })
+
+      // 파일 정보 준비
+      const fileUrl = `/${key}`
+
+      // MD5 해시 계산
+      console.log('MD5 해시 계산 시작')
+      const md5Hash = await generateMD5Hash(file)
+      console.log('MD5 해시 계산 완료:', md5Hash)
+
+      return {
+        url: fileUrl,
+        md5: md5Hash
+      }
+    } catch (error) {
+      console.error('파일 업로드 중 오류:', error)
+      toast({
+        title: '업로드 오류',
+        description: `파일 업로드 실패: ${error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'}`,
+        variant: "destructive"
+      })
+      throw error
+    } finally {
+      // 임시 파일 삭제 시도
+      if (tempFilePath) {
+        try {
+          console.log('임시 파일 삭제 시도:', tempFilePath)
+          await window.api.deleteTempFile({ filePath: tempFilePath })
+          console.log('임시 파일 삭제 완료')
+        } catch (deleteError) {
+          console.warn('임시 파일 삭제 실패:', deleteError)
+        }
+      }
+
+      setIsUploading(false)
+      console.log('파일 업로드 프로세스 종료')
+    }
+  }
+
   const handleImageUpload = async (file: File) => {
+    // 파일 크기 제한 (1GB)
+    if (file.size > 1024 * 1024 * 1024) {
+      toast({
+        title: '파일 크기 초과',
+        description: '파일 크기는 1GB를 초과할 수 없습니다.',
+        variant: "destructive"
+      })
+      return
+    }
+
+    // 파일 타입 검증
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: '잘못된 파일 형식',
+        description: '이미지 파일만 업로드 가능합니다.',
+        variant: "destructive"
+      })
+      return
+    }
+
     // 미리보기 생성
     const reader = new FileReader()
     reader.onload = (e) => {
@@ -151,40 +386,14 @@ function DesignEditor(): JSX.Element {
     setSelectedFile(file)
   }
 
-  const uploadImageToS3 = async (file: File) => {
-    try {
-      setIsUploading(true)
-
-      // S3에 이미지 업로드
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        throw new Error('이미지 업로드 실패')
-      }
-
-      const data = await response.json()
-      return data.url
-    } catch (error) {
-      console.error('이미지 업로드 오류:', error)
-      throw error
-    } finally {
-      setIsUploading(false)
-    }
-  }
-
   const saveTheme = async () => {
     try {
       let backgroundImageUrl = theme.backgroundImage
 
       // 새 이미지가 선택된 경우 업로드
       if (selectedFile) {
-        backgroundImageUrl = await uploadImageToS3(selectedFile)
+        const { url } = await uploadFileToS3(selectedFile)
+        backgroundImageUrl = url
         setSelectedFile(null)
         setPreviewImage(null)
       }
