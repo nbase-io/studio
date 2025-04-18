@@ -23,6 +23,7 @@ declare global {
         accessKeyId?: string;
         secretAccessKey?: string;
         region?: string;
+        endpointUrl?: string;
       }) => Promise<{
         success: boolean;
         location?: string;

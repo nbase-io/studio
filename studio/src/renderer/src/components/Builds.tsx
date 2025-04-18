@@ -531,7 +531,7 @@ function Builds(): JSX.Element {
         throw new Error('S3 설정을 가져올 수 없습니다');
       }
 
-      const { bucket, region, accessKeyId, secretAccessKey, cdnUrl } = s3Config;
+      const { bucket, region, accessKeyId, secretAccessKey, endpointUrl } = s3Config;
 
       // 랜덤 4자리 문자열 생성
       const randomPrefix = Math.random().toString(36).substring(2, 6);
@@ -595,7 +595,8 @@ function Builds(): JSX.Element {
         key,
         accessKeyId,
         secretAccessKey,
-        region
+        region,
+        endpointUrl
       });
 
       if (!uploadResult.success) {
@@ -1143,9 +1144,9 @@ function Builds(): JSX.Element {
         return;
       }
       addDebugLog(`editSetupFile: ${editSetupFile}`, 'info')
-      if (editSetupFile) {
-        await handleFileUpload(editSetupFile)
-      }
+      // if (editSetupFile) {
+      //   await handleFileUpload(editSetupFile)
+      // }
 
       // 빌드 업데이트
       await apiService.updateBuild(editingBuild.id, editingBuild)

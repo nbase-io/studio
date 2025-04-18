@@ -12,11 +12,25 @@ import { Button } from '@/components/ui/button'
 import { Loader2, CheckCircle2, AlertCircle,File as FileIcon } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '../lib/utils'
+import { useSettings } from '../main' // 서버 URL 설정을 위한 컨텍스트 훅 추가
+
+// axios import 수정 (타입 문제 해결)
+import axios from 'axios';
 
 // 컴포넌트 임포트
 import FolderTreeView, { S3Object } from './FolderTreeView'
 import FileListView from './FileListView'
 import FileToolbar from './FileToolbar'
+
+// STS 응답 타입 정의
+interface STSCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
+  region: string;
+  bucket: string;
+  expiration: string;
+}
 
 // 파일 업로드 상태 인터페이스
 interface FileUploadStatus {
@@ -61,6 +75,11 @@ const FileManager: React.FC = () => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
   const { toast } = useToast();
+  const { settings } = useSettings(); // 전역 설정 가져오기
+
+  // STS 자격 증명 상태 추가
+  const [stsCredentials, setStsCredentials] = useState<STSCredentials | null>(null);
+  const [stsExpiration, setStsExpiration] = useState<Date | null>(null);
 
   // 업로드 다이얼로그 상태
   const [uploadDialogOpen, setUploadDialogOpen] = useState<boolean>(false);
@@ -96,62 +115,61 @@ const FileManager: React.FC = () => {
     secretAccessKey: 'sample-secret'
   };
 
-  // S3 설정 가져오기 함수
+  // STS 자격 증명 가져오기 함수
+  const fetchSTSCredentials = async (prefix: string = '', expiresIn: number = 3600): Promise<STSCredentials> => {
+    // STS 자격 증명 사용하지 않음 - 더미 구현만 남겨둠
+    console.log('[STS] STS 자격 증명 사용하지 않음 (직접 자격 증명 사용)');
+    throw new Error('STS 자격 증명을 사용하지 않도록 설정되었습니다.');
+  };
+
+  // S3 설정 가져오기 함수 (직접 인증 방식 사용)
   const getS3Config = async () => {
-    console.log('[S3Config] S3 설정 가져오기 시작');
+    console.log('[S3Config] S3 설정 가져오기 시작 (직접 인증 방식)');
     try {
-      // window.api를 통해 설정 가져오기
+      // 1. 설정에서 직접 입력한 S3 정보 확인 (Settings에서 입력한 값)
+      if (settings && settings.accessKey && settings.secretKey && settings.s3Bucket) {
+        console.log('[S3Config] 설정에서 직접 입력한 S3 정보 사용');
+        return {
+          bucket: settings.s3Bucket,
+          region: settings.region || 'ap-northeast-2',
+          accessKeyId: settings.accessKey,
+          secretAccessKey: settings.secretKey,
+          endpointUrl: settings.endpointUrl, // 커스텀 엔드포인트 URL
+          cdnUrl: settings.cdnUrl
+        };
+      }
+
+      // 2. window.api를 통해 설정 가져오기 (폴백 1)
       if (window.api && typeof window.api.getS3Config === 'function') {
         console.log('[S3Config] window.api.getS3Config 함수 호출');
         const config = await window.api.getS3Config();
 
         // 반환된 설정 확인
-        if (config) {
+        if (config && config.accessKeyId && config.secretAccessKey && config.bucket) {
           console.log('[S3Config] S3 설정 로드 성공:', {
             bucket: config.bucket,
             region: config.region,
             accessKeyId: config.accessKeyId ? '***' : '설정되지 않음', // 보안을 위해 실제 키는 로그에 출력하지 않음
             secretKeySet: config.secretAccessKey ? true : false,
             cdnUrl: config.cdnUrl || '설정되지 않음',
-            endpointUrl: (config as any).endpointUrl || '설정되지 않음'
+            endpointUrl: config.endpointUrl || '설정되지 않음'
           });
           return config;
         } else {
-          console.warn('[S3Config] S3 설정이 null 또는 undefined 반환됨');
+          console.warn('[S3Config] S3 설정이 불완전하게 설정되었거나 누락됨');
         }
       } else {
         console.error('[S3Config] window.api.getS3Config 함수를 찾을 수 없음');
       }
 
-      // 로컬 스토리지에서 설정 가져오기 시도
-      console.log('[S3Config] 로컬 스토리지에서 설정 가져오기');
-      const settings = localStorage.getItem('settings');
-      if (settings) {
-        const parsedSettings = JSON.parse(settings);
-        console.log('[S3Config] 로컬 스토리지에서 설정 로드됨:', {
-          bucket: parsedSettings.s3Bucket || '설정되지 않음',
-          region: parsedSettings.region || 'ap-northeast-2',
-          accessKeySet: parsedSettings.accessKey ? true : false,
-          secretKeySet: parsedSettings.secretKey ? true : false,
-          cdnUrl: parsedSettings.cdnUrl || '설정되지 않음',
-          endpointUrl: parsedSettings.endpointUrl || '설정되지 않음'
-        });
+      // 4. 설정이 없음을 알림
+      console.error('[S3Config] 유효한 S3 자격 증명을 찾을 수 없음');
+      showErrorDialog(
+        'S3 설정 오류',
+        'S3 접근 자격 증명(Access Key, Secret Key)과 버킷 이름이 설정되지 않았습니다. 설정 메뉴에서 S3 설정을 구성하세요.'
+      );
 
-        // 로컬 스토리지에서 가져온 설정으로 S3Config 객체 생성
-        return {
-          bucket: parsedSettings.s3Bucket || '',
-          region: parsedSettings.region || 'ap-northeast-2',
-          accessKeyId: parsedSettings.accessKey || '',
-          secretAccessKey: parsedSettings.secretKey || '',
-          cdnUrl: parsedSettings.cdnUrl || '',
-          endpointUrl: (parsedSettings as any).endpointUrl || ''
-        };
-      } else {
-        console.warn('[S3Config] 로컬 스토리지에 설정이 없음');
-      }
-
-      // 기본 설정 반환
-      console.warn('[S3Config] 기본 설정 반환');
+      // 기본 설정 반환 (비어있는 값)
       return {
         bucket: '',
         region: 'ap-northeast-2',
@@ -162,6 +180,13 @@ const FileManager: React.FC = () => {
       };
     } catch (error) {
       console.error('[S3Config] S3 설정 가져오기 오류:', error);
+
+      // 오류 대화상자 표시
+      showErrorDialog(
+        'S3 설정 오류',
+        `S3 설정을 가져오는 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`
+      );
+
       // 오류 발생 시 기본 설정 반환
       return {
         bucket: '',
@@ -197,7 +222,7 @@ const FileManager: React.FC = () => {
         }
 
         // 액세스 키가 설정되지 않은 경우 처리
-        if (!s3Config.accessKeyId || !s3Config.secretAccessKey) {
+        if (!s3Config.accessKeyId || !s3Config.secretAccessKey || !s3Config.endpointUrl || !s3Config.region) {
           console.error('[S3] AWS 액세스 키가 설정되지 않음');
           showErrorDialog(
             'S3 설정 오류',
@@ -216,7 +241,6 @@ const FileManager: React.FC = () => {
               bucket: s3Config.bucket,
               prefix: '' // 루트 디렉토리
             });
-
             // API 응답 확인
             if (result.error) {
               console.error('[S3] API 오류 발생:', result.error);
@@ -314,9 +338,11 @@ const FileManager: React.FC = () => {
 
         try {
           console.log('[S3] API 호출: listS3Files, 버킷:', s3Config.bucket, '프리픽스:', normalizedPrefix);
+
+          // sessionToken이 있으면 STS 자격 증명 사용
           const result = await (window.api as any).listS3Files({
             bucket: s3Config.bucket,
-            prefix: normalizedPrefix
+            prefix: normalizedPrefix,
           });
 
           // API 응답 확인
@@ -585,7 +611,8 @@ const FileManager: React.FC = () => {
       const s3Config = await getS3Config();
       console.log('[Upload] S3 설정 로드 완료:', {
         버킷: s3Config.bucket,
-        리전: s3Config.region
+        리전: s3Config.region,
+        엔드포인트: s3Config.endpointUrl || '기본값'
       });
 
       // 매개변수 유효성 검사
@@ -637,7 +664,7 @@ const FileManager: React.FC = () => {
       // 진행 상태 업데이트
       updateProgress(25); // 임시 파일 생성 완료 = 25%
 
-      // S3에 업로드
+      // S3에 업로드 (STS 자격 증명 포함)
       console.log('[Upload] S3 업로드 시작');
       const uploadResult = await (window.api as any).uploadFileToS3({
         filePath: tempFilePath,
@@ -645,7 +672,9 @@ const FileManager: React.FC = () => {
         key: s3Key,
         accessKeyId: s3Config.accessKeyId,
         secretAccessKey: s3Config.secretAccessKey,
-        region: s3Config.region || 'ap-northeast-2'
+        sessionToken: s3Config.sessionToken, // STS 세션 토큰 추가
+        region: s3Config.region || 'ap-northeast-2',
+        endpointUrl: s3Config.endpointUrl // 엔드포인트 URL 추가
       });
 
       // 3. 업로드 결과 처리
@@ -1078,13 +1107,16 @@ const FileManager: React.FC = () => {
           description: `${fileName} 파일을 다운로드합니다...`,
         });
 
+        // STS 자격 증명으로 다운로드
         const result = await (window.api as any).downloadFileFromS3({
           bucket: s3Config.bucket,
           key: file.key,
           destination: saveResult.filePath,
           accessKeyId: s3Config.accessKeyId,
           secretAccessKey: s3Config.secretAccessKey,
-          region: s3Config.region
+          sessionToken: s3Config.sessionToken, // STS 세션 토큰 추가
+          region: s3Config.region,
+          endpointUrl: s3Config.endpointUrl // 엔드포인트 URL 추가
         });
 
         if (result.success) {

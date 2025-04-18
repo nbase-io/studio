@@ -65,6 +65,7 @@ declare global {
         accessKeyId: string;
         secretAccessKey: string;
         region: string;
+        endpointUrl: string;
       }) => Promise<{ success: boolean; error?: string }>;
       addFileToVersion: (params: {
         versionId: string;
@@ -701,7 +702,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         throw new Error('S3 설정을 가져올 수 없습니다');
       }
 
-      const { bucket, region, accessKeyId, secretAccessKey, cdnUrl } = s3Config;
+      const { bucket, region, accessKeyId, secretAccessKey, endpointUrl } = s3Config;
 
       // 랜덤 4자리 문자열 생성
       const randomPrefix = Math.random().toString(36).substring(2, 6);
@@ -793,7 +794,8 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         key,
         accessKeyId,
         secretAccessKey,
-        region
+        region,
+        endpointUrl
       });
 
       if (!uploadResult.success) {

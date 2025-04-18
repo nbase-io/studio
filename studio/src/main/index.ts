@@ -419,16 +419,18 @@ ipcMain.handle('get-s3-config', async () => {
 
       // Return S3 related settings
       return {
-        bucket: settingsData.s3Bucket || 'my-default-bucket',
+        bucket: settingsData.s3Bucket || '',
         region: settingsData.region || 'ap-northeast-2',
         accessKeyId: settingsData.accessKey || '',
-        secretAccessKey: settingsData.secretKey || ''
+        secretAccessKey: settingsData.secretKey || '',
+        endpointUrl: settingsData.endpointUrl || '',
+        cdnUrl: settingsData.cdnUrl || ''
       }
     }
 
     // Check if settings file doesn't exist, return default values
     return {
-      bucket: 'my-default-bucket',
+      bucket: '',
       region: 'ap-northeast-2',
       accessKeyId: '',
       secretAccessKey: ''
@@ -437,7 +439,7 @@ ipcMain.handle('get-s3-config', async () => {
     console.error('Error while getting S3 configuration:', error)
     // Return default values when error occurs
     return {
-      bucket: 'my-default-bucket',
+      bucket: '',
       region: 'ap-northeast-2',
       accessKeyId: '',
       secretAccessKey: ''
@@ -468,9 +470,12 @@ ipcMain.handle('list-s3-files', async (_, { bucket, prefix }) => {
       region: settings.region || 'ap-northeast-2',
       credentials: {
         accessKeyId: settings.accessKey,
-        secretAccessKey: settings.secretKey
-      }
+        secretAccessKey: settings.secretKey,
+      },
+      endpoint: settings.endpointUrl,
+      forcePathStyle: true,
     });
+
 
     // Create ListObjectsV2 command
     const command = new ListObjectsV2Command({
@@ -577,7 +582,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
       throw new Error('Parameters must be passed as an object');
     }
 
-    const { filePath, bucket, key, accessKeyId, secretAccessKey, region } = params;
+    const { filePath, bucket, key, accessKeyId, secretAccessKey, region, endpointUrl } = params;
 
     // Parameter validation
     if (!filePath || !bucket || !key) {
@@ -622,6 +627,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
         accessKeyId: accessKeyId || '',
         secretAccessKey: secretAccessKey || ''
       },
+      endpoint: endpointUrl,
       // Use path style URL (resolves some compatibility issues)
       forcePathStyle: true
     });
@@ -835,7 +841,9 @@ ipcMain.handle('delete-file-from-s3', async (_, params: any) => {
       credentials: {
         accessKeyId: settings.accessKey,
         secretAccessKey: settings.secretKey
-      }
+      },
+      endpoint: settings.endpointUrl,
+      forcePathStyle: true,
     })
 
     // Create file deletion command
@@ -891,7 +899,9 @@ ipcMain.handle('rename-file-in-s3', async (_, params: any) => {
       credentials: {
         accessKeyId: params.accessKey || '',
         secretAccessKey: params.secretKey || ''
-      }
+      },
+      endpoint: params.endpointUrl,
+      forcePathStyle: true,
     });
 
     // Get original object from S3
@@ -963,7 +973,7 @@ ipcMain.handle('select-save-location', async (_, params: any) => {
 // S3 file download handler
 ipcMain.handle('download-file-from-s3', async (_, params: any) => {
   try {
-    const { bucket, key, destination, region, accessKeyId, secretAccessKey } = params;
+    const { bucket, key, destination, region, accessKeyId, secretAccessKey, endpointUrl } = params;
 
     if (!bucket || !key || !destination) {
       throw new Error('Missing required parameters (bucket, key, destination)');
@@ -977,7 +987,9 @@ ipcMain.handle('download-file-from-s3', async (_, params: any) => {
       credentials: {
         accessKeyId: accessKeyId || '',
         secretAccessKey: secretAccessKey || ''
-      }
+      },
+      endpoint: endpointUrl,
+      forcePathStyle: true,
     });
 
     // Get object from S3
