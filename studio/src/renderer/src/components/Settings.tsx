@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Loader2, CheckCircle, AlertCircle, Save } from 'lucide-react'
+import { Loader2, CheckCircle, AlertCircle, Save, LogIn } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import {
   Dialog,
@@ -29,18 +29,21 @@ function Settings(): JSX.Element {
   // 글로벌 설정 컨텍스트 사용
   const { settings: globalSettings, loading: globalLoading, saveSettings: saveGlobalSettings } = useSettings();
 
+  // 로그인 화면 상태
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+
   // 로컬 상태 - 수정 중인 설정을 위한 상태
   const [settings, setSettings] = useState({
-    accessKey: '',
-    secretKey: '',
-    region: 'ap-northeast-2',
-    s3Bucket: '',
     projectId: '',
     apiKey: '',
-    serverUrl: 'https://plugin.gamepot.ntruss.com',
+    accessKey: '',
+    secretKey: '',
+    region: '',
+    s3Bucket: '',
+    serverUrl: '',
     cdnUrl: '',
-    endpointUrl: ''
-  })
+    endpointUrl: '',
+  });
 
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -50,6 +53,10 @@ function Settings(): JSX.Element {
   // 테스트 결과 다이얼로그 상태
   const [showResultDialog, setShowResultDialog] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
+
+  // Builds 접속 오류 다이얼로그 상태
+  const [showBuildsErrorDialog, setShowBuildsErrorDialog] = useState(false)
+  const [buildsError, setBuildsError] = useState<string>("")
 
   // 글로벌 설정이 로드되면 로컬 상태에 적용
   useEffect(() => {
@@ -63,10 +70,26 @@ function Settings(): JSX.Element {
         apiKey: globalSettings.apiKey || '',
         serverUrl: globalSettings.serverUrl || 'https://plugin.gamepot.ntruss.com',
         cdnUrl: globalSettings.cdnUrl || '',
-        endpointUrl: globalSettings.endpointUrl || ''
+        endpointUrl: typeof globalSettings.endpointUrl === 'string' ? globalSettings.endpointUrl : ''
       });
     }
   }, [globalSettings, globalLoading]);
+
+  // Builds 접속 오류 이벤트 리스너
+  useEffect(() => {
+    const handleBuildsError = (event: CustomEvent<{error: string}>) => {
+      setBuildsError(event.detail.error);
+      setShowBuildsErrorDialog(true);
+    };
+
+    // 이벤트 리스너 등록
+    window.addEventListener('builds-access-error', handleBuildsError as EventListener);
+
+    // 컴포넌트 언마운트 시 이벤트 리스너 제거
+    return () => {
+      window.removeEventListener('builds-access-error', handleBuildsError as EventListener);
+    };
+  }, []);
 
   const handleInputChange = (key: string, value: string) => {
     setSettings(prev => ({
@@ -251,61 +274,52 @@ function Settings(): JSX.Element {
   };
 
   return (
-    <div className="container mx-auto p-4 text-xs h-full">
-      <h1 className="text-xl font-bold mb-2">Settings</h1>
-      <p className="text-xs text-gray-500 mb-4">Configure your GamePot studio settings</p>
+    <div className="container mx-auto p-4 text-sm h-full">
+      <h1 className="text-base font-bold mb-2">Settings</h1>
+      <p className="text-sm text-gray-500 mb-4">Configure your GamePot studio settings</p>
 
       <ScrollArea className="h-[calc(100vh-8rem)]">
         <div className="flex flex-col space-y-6">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">API Configuration</CardTitle>
+              <CardTitle className="text-sm font-bold">API Configuration</CardTitle>
               <CardDescription className="text-xs">Configure API access for build management.</CardDescription>
+
+              {/* 로그인 버튼 추가 */}
+              <div className="flex justify-end mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // 깔끔하게 이벤트만 발생시킴
+                    const showLoginEvent = new CustomEvent('show-login-modal');
+                    window.dispatchEvent(showLoginEvent);
+                  }}
+                  className="text-xs h-8"
+                >
+
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
                   <Label htmlFor="projectId" className="text-xs">Project ID</Label>
                   <Input
                     id="projectId"
                     value={settings.projectId}
                     onChange={(e) => handleInputChange('projectId', e.target.value)}
-                    placeholder="your-project-id"
                     className="h-8 text-xs"
                   />
                 </div>
-
-                <div className="space-y-1">
-                  <Label htmlFor="apiKey" className="text-xs">API Key</Label>
+                <div>
+                  <Label htmlFor="apiKey" className="text-xs">PLUGIN API Key</Label>
                   <Input
                     id="apiKey"
-                    type="password"
                     value={settings.apiKey}
                     onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                    placeholder="your-api-key"
                     className="h-8 text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label htmlFor="serverUrl" className="text-xs">Server URL</Label>
-                  <Input
-                    id="serverUrl"
-                    value={settings.serverUrl}
-                    onChange={(e) => handleInputChange('serverUrl', e.target.value)}
-                    placeholder="https://plugin.gamepot.ntruss.com"
-                    className="h-8 text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label htmlFor="cdnUrl" className="text-xs">CDN URL</Label>
-                  <Input
-                    id="cdnUrl"
-                    value={settings.cdnUrl}
-                    onChange={(e) => handleInputChange('cdnUrl', e.target.value)}
-                    placeholder="https://cdn.yourdomain.com"
-                    className="h-8 text-xs"
+                    type="password"
                   />
                 </div>
               </div>
@@ -314,11 +328,11 @@ function Settings(): JSX.Element {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">S3 Configuration</CardTitle>
+              <CardTitle className="text-sm font-bold">S3 Configuration</CardTitle>
               <CardDescription className="text-xs">Configure credentials to access S3 buckets.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <CardContent className="space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label htmlFor="accessKey" className="text-xs">Access Key ID</Label>
                   <Input
@@ -382,7 +396,7 @@ function Settings(): JSX.Element {
                 className="flex-1 h-8 text-xs"
                 disabled={testingConnection || !settings.s3Bucket}
               >
-                {testingConnection && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                {testingConnection && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
                 Test S3 Connection
               </Button>
             </CardFooter>
@@ -391,18 +405,18 @@ function Settings(): JSX.Element {
           <div className="flex justify-end space-x-3 mt-4">
             <Button
               onClick={saveSettings}
-              className="h-10 px-6"
+              className="h-9 px-4 text-xs"
               disabled={loading}
-              size="default"
+              size="sm"
             >
               {loading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                   저장 중...
                 </>
               ) : (
                 <>
-                  <Save className="mr-2 h-4 w-4" />
+                  <Save className="mr-1 h-4 w-4" />
                   Save
                 </>
               )}
@@ -435,7 +449,7 @@ function Settings(): JSX.Element {
 
           <div className="space-y-4">
             {/* 테스트 상세 정보 */}
-            <div className="bg-gray-50 rounded-md p-3 text-xs">
+            <div className="bg-gray-50 rounded-md p-3 text-sm">
               <h4 className="font-medium mb-2">연결 정보</h4>
               <div className="space-y-1">
                 {testResult?.details.map((detail, index) => (
@@ -447,12 +461,12 @@ function Settings(): JSX.Element {
             {/* 파일 및 폴더 목록 (성공한 경우에만) */}
             {testResult?.success && testResult.folders && testResult.folders.length > 0 && (
               <div>
-                <h4 className="font-medium mb-2 text-xs">버킷 내 폴더</h4>
+                <h4 className="font-medium mb-2 text-sm">버킷 내 폴더</h4>
                 <ScrollArea className="h-28 rounded-md border p-2">
                   <div className="space-y-1">
                     {testResult.folders.map((folder, idx) => (
                       <div key={idx} className="text-xs flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 mr-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 mr-1">
                           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                         </svg>
                         {folder}
@@ -465,13 +479,13 @@ function Settings(): JSX.Element {
 
             {testResult?.success && testResult.files && testResult.files.length > 0 && (
               <div>
-                <h4 className="font-medium mb-2 text-xs">버킷 내 파일</h4>
+                <h4 className="font-medium mb-2 text-sm">버킷 내 파일</h4>
                 <ScrollArea className="h-28 rounded-md border p-2">
                   <div className="space-y-1">
                     {testResult.files.map((file, idx) => (
                       <div key={idx} className="text-xs flex items-center justify-between">
                         <div className="flex items-center truncate">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500 mr-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500 mr-1">
                             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
                             <polyline points="13 2 13 9 20 9"></polyline>
                           </svg>
@@ -487,8 +501,51 @@ function Settings(): JSX.Element {
           </div>
 
           <DialogFooter>
-            <Button onClick={() => setShowResultDialog(false)} className="h-8 text-xs">
+            <Button onClick={() => setShowResultDialog(false)} className="h-9 text-sm">
               닫기
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Builds 접속 오류 다이얼로그 */}
+      <Dialog open={showBuildsErrorDialog} onOpenChange={setShowBuildsErrorDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
+              <span>Builds 접속 오류</span>
+            </DialogTitle>
+            <DialogDescription>
+              빌드 서비스에 접속하는 중 오류가 발생했습니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* 오류 상세 정보 */}
+            <div className="bg-gray-50 rounded-md p-3 text-sm">
+              <h4 className="font-medium mb-2">오류 정보</h4>
+              <div className="space-y-1">
+                <div className="text-gray-700">{buildsError}</div>
+                <div className="text-gray-700">시간: {new Date().toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setShowBuildsErrorDialog(false)} className="h-9 text-sm">
+              닫기
+            </Button>
+            <Button
+              onClick={() => {
+                setShowBuildsErrorDialog(false);
+                // 재시도 이벤트 발생
+                window.dispatchEvent(new CustomEvent('retry-builds-access'));
+              }}
+              className="h-9 text-sm"
+              variant="default"
+            >
+              재시도
             </Button>
           </DialogFooter>
         </DialogContent>

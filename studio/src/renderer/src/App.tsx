@@ -16,13 +16,27 @@ function AppContent(): JSX.Element {
   const { settings, loading, loadSettings } = useSettings();
 
   // 로그인 모달 상태
-  const [showLogin, setShowLogin] = useState(true); // 기본값을 true로 설정
+  const [showLogin, setShowLogin] = useState(false); // 기본값을 false로 변경
 
   // 전역 에러 함수 설정
   React.useEffect(() => {
     setErrorDialogFunction(showError);
     return () => setErrorDialogFunction(() => {});
   }, [showError]);
+
+  // 외부에서 로그인 모달을 표시할 수 있는 이벤트 리스너 추가
+  useEffect(() => {
+    const handleShowLoginModal = () => {
+      console.log('Show login modal event received');
+      setShowLogin(true);
+    };
+
+    window.addEventListener('show-login-modal', handleShowLoginModal);
+
+    return () => {
+      window.removeEventListener('show-login-modal', handleShowLoginModal);
+    };
+  }, []);
 
   // 앱 시작 시 설정 강제 로드
   useEffect(() => {
@@ -43,19 +57,32 @@ function AppContent(): JSX.Element {
   useEffect(() => {
     if (!loading) {
       // 설정이 존재하는지 확인
-      const hasValidSettings = settings &&
-                               typeof settings === 'object' &&
-                               Object.keys(settings).length > 0 &&
-                               !!settings.projectId &&
-                               !!settings.apiKey;
+      const hasProjectId = settings &&
+                           typeof settings === 'object' &&
+                           !!settings.projectId;
+
+      const hasApiKey = settings &&
+                         typeof settings === 'object' &&
+                         !!settings.apiKey;
+
+      const hasValidSettings = hasProjectId && hasApiKey;
 
       // 로그 한 번만 출력
-      console.log('Settings check:', { hasSettings: !!settings, hasValidSettings });
+      console.log('Settings check:', {
+        hasSettings: !!settings,
+        hasProjectId,
+        hasApiKey,
+        hasValidSettings
+      });
 
-      // 로그인 화면 표시 여부 설정
-      setShowLogin(!hasValidSettings);
+      // 설정이 없는 경우에만 로그인 화면 표시
+      if (!hasValidSettings) {
+        setShowLogin(true);
+      } else {
+        setShowLogin(false);
+      }
     }
-  }, [loading]); // settings 의존성 제거하여 무한 루프 방지
+  }, [loading, settings]); // settings 의존성 다시 추가
 
   const renderContent = () => {
     // 로그인 모달을 표시해야 하는 경우
