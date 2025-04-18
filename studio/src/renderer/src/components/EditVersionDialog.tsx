@@ -1,4 +1,4 @@
-import { useState, ChangeEvent, DragEvent } from 'react';
+import { ChangeEvent, DragEvent } from 'react';
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/select";
 import { UploadCloud, FilePlus, File, X, Loader2, Download, Trash } from 'lucide-react';
 import { Version, VersionFile } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
 import { showGlobalError } from './ErrorDialog';
 
 interface EditVersionDialogProps {
@@ -59,7 +58,6 @@ export default function EditVersionDialog({
   uploadProgress,
   isSubmitting,
   isUploading,
-  filesToDelete,
   setFilesToDelete,
   handleUpdateVersion,
   handleDragOver,
@@ -77,16 +75,16 @@ export default function EditVersionDialog({
       if (cancelUpload) {
         cancelUpload();
         toast({
-          title: "업로드 취소됨",
-          description: "파일 업로드가 취소되었습니다.",
+          title: "Upload Canceled",
+          description: "File upload has been canceled.",
           variant: "destructive"
         });
       } else {
-        if (window.confirm("업로드가 진행 중입니다. 정말 취소하시겠습니까?")) {
+        if (window.confirm("Upload is in progress. Are you sure you want to cancel?")) {
           setShowDialog(false);
           toast({
-            title: "업로드 취소됨",
-            description: "파일 업로드가 취소되었습니다.",
+            title: "Upload Canceled",
+            description: "File upload has been canceled.",
             variant: "destructive"
           });
         } else {
@@ -253,40 +251,41 @@ export default function EditVersionDialog({
                 </div>
               )}
 
-              {selectedVersion.files && selectedVersion.files && selectedVersion?.files?.length > 0 ? (
+              {selectedVersion.files && selectedVersion.files.files && selectedVersion.files.files.length > 0 ? (
                 <div className="mb-4">
                   <div className="text-xs font-medium mb-2">
-                    현재 파일 목록 ({selectedVersion.files?.totalCount || selectedVersion.files?.length}개)
-                    {selectedVersion.files?.totalSize ? ` (총 ${formatFileSize(selectedVersion.files?.totalSize)})` : ''}
+                    Current Files ({selectedVersion.files?.totalCount || selectedVersion.files.files.length})
+                    {selectedVersion.files?.totalSize ? ` (Total ${formatFileSize(selectedVersion.files?.totalSize)})` : ''}
                   </div>
                   <div className="max-h-40 overflow-y-auto border rounded-md">
-                    {selectedVersion.files.map((file) => (
+                    {selectedVersion.files.files.map((file) => (
                       <div key={file.id} className="flex items-center justify-between p-2 hover:bg-gray-50 border-b last:border-b-0">
                         <div className="flex items-center space-x-2 flex-1">
                           <File className="h-3 w-3 text-blue-500" />
-                          <div className="text-xs flex-1 truncate" title={file.name || file.fileName}>
+                          <div className="text-xs truncate" title={file.name}>
                             {file.name || file.fileName}
                           </div>
-                          <div className="text-[9px] text-gray-500">
+                          <div className="text-xs text-gray-500">
                             {formatFileSize(file.size || file.fileSize || 0)}
                           </div>
                         </div>
-                        <div className="flex items-center space-x-1">
+                        <div className="flex space-x-1">
                           <button
-                            type="button"
+                            className="text-blue-500 text-xs hover:text-blue-700"
                             onClick={() => {
-                              if (file.fileUrl && cdnUrl) {
-                                window.open(`${cdnUrl}/${file.fileUrl.replace(/^\//, '')}`, '_blank')
+                              if (file.download_url) {
+                                window.open(file.download_url, '_blank');
                               } else {
-                                showGlobalError('다운로드 실패', '다운로드 링크가 없습니다.');
+                                showGlobalError('Download Failed', 'Download link is not available.');
                               }
                             }}
-                            className="text-blue-500 hover:text-blue-600"
+                            disabled={!file.download_url}
+                            title="Download file"
                           >
                             <Download className="h-3 w-3" />
                           </button>
                           <button
-                            type="button"
+                            className="text-red-500 text-xs hover:text-red-700"
                             onClick={() => {
                               if (!file.id) return;
 
@@ -303,11 +302,11 @@ export default function EditVersionDialog({
                               });
 
                               toast({
-                                title: '삭제 대기',
-                                description: `${file.name || file.fileName} 파일이 삭제 목록에 추가되었습니다. 저장 시 완전히 삭제됩니다.`
+                                title: "Pending Deletion",
+                                description: `${file.name || file.fileName} has been added to the deletion list. It will be permanently deleted when saved.`
                               });
                             }}
-                            className="text-red-500 hover:text-red-600"
+                            title="Delete file"
                           >
                             <Trash className="h-3 w-3" />
                           </button>
@@ -318,9 +317,9 @@ export default function EditVersionDialog({
                 </div>
               ) : (
                 <div className="mb-4">
-                  <div className="text-xs font-medium mb-2">현재 파일 목록</div>
+                  <div className="text-xs font-medium mb-2">Current Files</div>
                   <div className="p-4 text-center border rounded-md">
-                    <div className="text-xs text-gray-500">등록된 파일이 없습니다.</div>
+                    <div className="text-xs text-gray-500">No files registered.</div>
                   </div>
                 </div>
               )}
@@ -334,8 +333,8 @@ export default function EditVersionDialog({
               if (isUploading && cancelUpload) {
                 cancelUpload();
                 toast({
-                  title: "업로드 취소됨",
-                  description: "파일 업로드가 취소되었습니다.",
+                  title: "Upload Canceled",
+                  description: "File upload has been canceled.",
                   variant: "destructive"
                 });
               }

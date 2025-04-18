@@ -1,12 +1,12 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, session } from 'electron'
-import { join, dirname } from 'path'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import fs from 'fs'
 import crypto from 'crypto'
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
-import { createReadStream, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
+import { autoUpdater } from 'electron-updater'
 
 // 환경설정 파일 경로
 const settingsFilePath = join(app.getPath('userData'), 'settings.dat')
@@ -20,13 +20,20 @@ const ENCRYPTION_KEY = 'gamelauncher-secure-encryption-key-2024'
 // 임시 파일 디렉토리 - 애플리케이션별 임시 디렉토리 생성
 const appTempDir = join(tmpdir(), `gamepot-studio-${Date.now()}`);
 
+// Auto updater configuration
+if (!is.dev) {
+  autoUpdater.logger = console;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.autoDownload = false;
+}
+
 // 단일 인스턴스 적용
 const gotTheLock = app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   app.quit()
 } else {
-  app.on('second-instance', (_, commandLine, workingDirectory) => {
+  app.on('second-instance', (_) => {
     // 두 번째 인스턴스가 실행되면 첫 번째 인스턴스의 창을 활성화
     const windows = BrowserWindow.getAllWindows()
     if (windows.length) {
@@ -44,7 +51,7 @@ const ENCRYPTION_KEY_BUFFER = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
 function saveWindowSettings(window: BrowserWindow): void {
   try {
     // 현재 창 상태 가져오기
-    const { width, height, x, y, isMaximized } = window.getBounds() as { width: number; height: number; x: number; y: number; isMaximized?: boolean };
+    const { width, height, x, y } = window.getBounds() as { width: number; height: number; x: number; y: number };
 
     // 최대화 상태 확인
     const maximized = window.isMaximized();
@@ -87,6 +94,74 @@ function loadWindowSettings(): { width: number; height: number; x?: number; y?: 
   };
 }
 
+// Auto updater events
+function setupAutoUpdater(mainWindow: BrowserWindow): void {
+  // Check for updates
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow.webContents.send('update-status', { status: 'checking' });
+  });
+
+  // Update available
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Available',
+      message: `New version ${info.version} is available. Do you want to download it now?`,
+      buttons: ['Yes', 'No'],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) {
+        mainWindow.webContents.send('update-status', { status: 'downloading' });
+        autoUpdater.downloadUpdate();
+      }
+    });
+  });
+
+  // No update available
+  autoUpdater.on('update-not-available', () => {
+    mainWindow.webContents.send('update-status', { status: 'no-update' });
+  });
+
+  // Download progress
+  autoUpdater.on('download-progress', (progressObj) => {
+    mainWindow.webContents.send('update-status', {
+      status: 'downloading',
+      progress: progressObj.percent
+    });
+  });
+
+  // Update downloaded
+  autoUpdater.on('update-downloaded', (info) => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Ready',
+      message: `New version ${info.version} has been downloaded. The application will restart to install the update.`,
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall(false, true);
+      }
+    });
+  });
+
+  // Error in auto-updater
+  autoUpdater.on('error', (error: Error) => {
+    console.error('Auto updater error:', error);
+    mainWindow.webContents.send('update-status', {
+      status: 'error',
+      error: error.message
+    });
+  });
+
+  // Check for updates (with 3 second delay after app starts)
+  if (!is.dev) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates();
+    }, 3000);
+  }
+}
+
 function createWindow(): void {
   // 이전 윈도우 설정 로드
   const windowSettings = loadWindowSettings();
@@ -112,6 +187,9 @@ function createWindow(): void {
       allowRunningInsecureContent: false
     }
   })
+
+  // 자동 업데이트 설정
+  setupAutoUpdater(mainWindow);
 
   // 윈도우가 최대화된 상태로 저장되었으면 최대화
   if (windowSettings.maximized) {
@@ -350,10 +428,14 @@ ipcMain.handle('list-s3-files', async (_, { bucket, prefix }) => {
       .map(prefix => prefix.Prefix);
 
     return { files, folders };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('S3 파일 목록 가져오기 중 오류:', error);
     // 오류 발생 시 빈 목록 반환
-    return { files: [], folders: [], error: error.message };
+    return {
+      files: [],
+      folders: [],
+      error: error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'
+    };
   }
 })
 
@@ -419,7 +501,7 @@ ipcMain.handle('cancel-upload', async (event) => {
 // S3 파일 업로드 핸들러
 ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
   // 진행 중인 업로드 객체 (취소를 위해 사용)
-  let uploadOperation = null;
+  let uploadOperation: { key: string; abort: () => Promise<boolean> } | null = null;
 
   try {
     // 파라미터 형식 검증
@@ -450,7 +532,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
     let contentType = 'application/octet-stream'; // 기본값
 
     // 일반적인 파일 확장자에 따른 MIME 타입 설정
-    const mimeTypes = {
+    const mimeTypes: Record<string, string> = {
       'exe': 'application/octet-stream',
       'dmg': 'application/x-apple-diskimage',
       'apk': 'application/vnd.android.package-archive',
@@ -534,7 +616,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
         }
       };
 
-      activeUploads.get(senderID).push(uploadOperation);
+      activeUploads.get(senderID)?.push(uploadOperation);
 
       // 진행률 보고
       multipartUpload.on('httpUploadProgress', (progress) => {
@@ -595,7 +677,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
         }
       };
 
-      activeUploads.get(senderID).push(uploadOperation);
+      activeUploads.get(senderID)?.push(uploadOperation);
 
       const command = new PutObjectCommand(uploadParams);
       response = await s3Client.send(command);
@@ -618,7 +700,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
     // 완료된 업로드를 활성 목록에서 제거
     if (uploadOperation && senderID) {
       const uploads = activeUploads.get(senderID) || [];
-      const index = uploads.findIndex(u => u.key === key);
+      const index = uploads.findIndex(u => u.key === uploadOperation?.key);
       if (index !== -1) {
         uploads.splice(index, 1);
       }
@@ -637,7 +719,7 @@ ipcMain.handle('upload-file-to-s3', async (event, params: any) => {
     if (uploadOperation && event?.sender?.id) {
       const senderID = event.sender.id;
       const uploads = activeUploads.get(senderID) || [];
-      const index = uploads.findIndex(u => u.key === uploadOperation.key);
+      const index = uploads.findIndex(u => u.key === uploadOperation?.key);
       if (index !== -1) {
         uploads.splice(index, 1);
       }
@@ -1041,6 +1123,13 @@ function cleanupTempDirectory() {
     console.error('임시 디렉토리 삭제 실패:', error);
   }
 }
+
+// 업데이트 확인 요청 처리
+ipcMain.handle('check-for-updates', async () => {
+  if (!is.dev) {
+    autoUpdater.checkForUpdates();
+  }
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

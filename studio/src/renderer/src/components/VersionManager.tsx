@@ -9,27 +9,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription
-} from "@/components/ui/dialog"
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious } from '@/components/ui/pagination'
 import { apiService, Build, Version, VersionFile } from '@/lib/api'
-import { ChevronLeft, Plus, Trash, Edit, Download, UploadCloud, Loader2, RefreshCw, AlertTriangle, FilePlus, File, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { ChevronLeft, Plus, Trash, Edit, Download,  Loader2, RefreshCw, AlertTriangle, } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/components/ui/use-toast'
 import { Badge } from '@/components/ui/badge'
@@ -839,9 +821,6 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
 
       // 파일 정보 준비
       const fileUrl = `${cdnUrl}/${key}`;
-      // 상대 경로만 따로 저장 (cdn url 제외)
-      const relativePath = key;
-
       // MD5 해시 계산
       console.log(`MD5 해시 계산 중: ${file.name}`);
       const md5Hash = await generateMD5Hash(file);
@@ -1175,21 +1154,10 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     return undefined;
   }, [toast]);
 
-
-  // 시간 포맷팅 함수
-  const formatTime = (seconds: number): string => {
-    if (!isFinite(seconds) || seconds < 0) return '계산 중...';
-    if (seconds < 60) return `${Math.ceil(seconds)}초`;
-
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.ceil(seconds % 60);
-
-    if (minutes < 60) return `${minutes}분 ${remainingSeconds}초`;
-
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-
-    return `${hours}시간 ${remainingMinutes}분`;
+  // 포맷 파일 사이즈 래퍼 함수 - undefined 처리 지원
+  const formatFileSizeWrapper = (bytes: number | undefined): string => {
+    if (bytes === undefined) return '0 B';
+    return formatFileSize(bytes);
   };
 
   // 업로드 파일 제거
@@ -1259,48 +1227,28 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       for (let i = 0; i < uploadedFileData.length; i++) {
         const fileData = uploadedFileData[i];
         try {
-          // API 서버에 파일 정보 등록 (최대 3번 재시도)
-          let retryCount = 0;
-          const maxRetries = 3;
-          let lastError;
-          let success = false;
+          // API 서버에 파일 정보 등록
+          console.log(`파일 정보를 API 서버에 등록 중 (${i+1}/${uploadedFileData.length}): ${fileData.name}`);
 
-          while (retryCount < maxRetries && !success) {
-            try {
-              await apiService.addFileToVersion(buildId, versionId, {
-                name: fileData.name,
-                size: fileData.size,
-                fileSize: fileData.size,
-                download_url: fileData.relativePath,
-                md5_hash: fileData.md5,
-                fileType: uploadedFiles[i].type,
-                fileName: fileData.name,
-                originalName: fileData.originalName || fileData.name, // 원본 파일명 사용
-                filePath: fileData.relativePath,
-              });
+          const result = await apiService.addFileToVersion(buildId, versionId, {
+            name: fileData.name,
+            size: fileData.size,
+            fileSize: fileData.size,
+            download_url: fileData.relativePath,
+            md5_hash: fileData.md5,
+            fileType: uploadedFiles[i].type,
+            fileName: fileData.name,
+            originalName: fileData.originalName || fileData.name, // 원본 파일명 사용
+            filePath: fileData.relativePath,
+          });
 
-              if(!result?.message) {
-                success = true;
-                fileData.registered = true;
-                console.log(`파일 정보가 API 서버에 성공적으로 저장되었습니다 (${i+1}/${uploadedFileData.length}): ${fileData.name}`);
-              } else {
-
-              }
-            } catch (error) {
-
-              lastError = error;
-              retryCount++;
-
-              if (retryCount < maxRetries) {
-                console.warn(`API 서버 등록 실패, 재시도 ${retryCount}/${maxRetries}: ${fileData.name}`, error);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
-            }
-          }
-
-          if (!success) {
+          if(result) {
+            allFilesRegistered = true;
+            fileData.registered = true;
+            console.log(`파일 정보가 API 서버에 성공적으로 저장되었습니다 (${i+1}/${uploadedFileData.length}): ${fileData.name}`);
+          } else {
+            console.error(`${fileData.name} 파일 정보 API 서버 등록 실패`);
             allFilesRegistered = false;
-            console.error(`${fileData.name} 파일 정보 API 서버 등록 실패:`, lastError);
           }
         } catch (error) {
           allFilesRegistered = false;
@@ -1471,8 +1419,8 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
                           className="p-0 h-auto text-[7px]"
                           onClick={() => handleViewFiles(version)}
                         >
-                          {version.files?.length || 0} files
-                          {version.files?.totalSize ? ` (${formatFileSize(version.files.totalSize)})` : ''}
+                          {version.files?.totalCount || 0} files
+                          {version.files?.totalSize ? ` (${formatFileSizeWrapper(version.files.totalSize)})` : ''}
                         </Button>
                       </TableCell>
                       <TableCell className="text-[6px] py-1 px-2">
@@ -1631,7 +1579,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         handleDrop={handleDrop}
         handleRemoveFile={handleRemoveFile}
         handleFileSelect={handleFileSelect}
-        formatFileSize={formatFileSize}
+        formatFileSize={formatFileSizeWrapper}
         toast={toast}
         cancelUpload={handleCancelUpload}
       />
@@ -1648,7 +1596,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
         showDialog={showFilesDialog}
         setShowDialog={setShowFilesDialog}
         selectedVersion={selectedVersionFiles}
-        formatFileSize={formatFileSize}
+        formatFileSize={formatFileSizeWrapper}
       />
     </div>
   )

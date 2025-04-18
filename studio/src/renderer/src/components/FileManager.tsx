@@ -33,15 +33,6 @@ interface FileUploadStatus {
   uploadedBytes?: number; // 업로드된 바이트 수
 }
 
-// S3Config 인터페이스에 주석 추가
-interface S3Config {
-  bucket: string;      // S3 버킷 이름
-  region: string;      // S3 리전 (예: ap-northeast-2)
-  accessKeyId: string; // AWS 액세스 키 ID
-  secretAccessKey: string; // AWS 시크릿 액세스 키
-  cdnUrl?: string;     // CDN URL (선택 사항)
-  endpointUrl?: string; // 사용자 정의 엔드포인트 URL (선택 사항)
-}
 
 // 간단한 Progress 컴포넌트
 const CustomProgress = ({ value = 0, className = "" }: { value?: number, className?: string }) => (
@@ -1681,7 +1672,7 @@ const FileManager: React.FC = () => {
                 className="col-span-3 flex h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
-                placeholder="새 폴더 이름을 입력하세요"
+                placeholder="Enter new folder name"
               />
             </div>
           </div>

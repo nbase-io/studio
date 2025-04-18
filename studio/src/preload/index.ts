@@ -105,7 +105,7 @@ const api = {
 
   // 이벤트 리스너 관리
   on: (channel: string, func: (...args: any[]) => void) => {
-    const validChannels = ['upload-progress', 'upload-cancelled'];
+    const validChannels = ['upload-progress', 'upload-cancelled', 'update-status'];
     if (validChannels.includes(channel)) {
       return ipcRenderer.on(channel, (event, ...args) => func(event, ...args));
     }
@@ -113,11 +113,16 @@ const api = {
   },
 
   off: (channel: string, func: (...args: any[]) => void) => {
-    const validChannels = ['upload-progress', 'upload-cancelled'];
+    const validChannels = ['upload-progress', 'upload-cancelled', 'update-status'];
     if (validChannels.includes(channel)) {
       return ipcRenderer.removeListener(channel, (event, ...args) => func(event, ...args));
     }
     return null;
+  },
+
+  // 업데이트 체크 요청
+  checkForUpdates: (): Promise<void> => {
+    return ipcRenderer.invoke('check-for-updates');
   }
 }
 

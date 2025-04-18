@@ -3,6 +3,7 @@ import Builds from './components/Builds'
 import Settings from './components/Settings'
 import DesignEditor from './components/DesignEditor'
 import FileManager from './components/FileManager'
+import UpdateNotification from './components/UpdateNotification'
 import { ErrorDialogProvider, useErrorDialog, setErrorDialogFunction } from './components/ErrorDialog'
 
 // ErrorDialog를 사용하는 내부 컴포넌트
@@ -130,6 +131,9 @@ function AppContent(): JSX.Element {
       {/* 메인 콘텐츠 영역 */}
       <div className="flex-1 flex flex-col">
         {renderContent()}
+
+        {/* 업데이트 알림 컴포넌트 */}
+        <UpdateNotification />
       </div>
     </div>
   )

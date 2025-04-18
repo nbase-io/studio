@@ -67,55 +67,53 @@ export default function AddVersionDialog({
   const [isVersionSaved, setIsVersionSaved] = useState<boolean>(false);
   const { toast } = useToast();
 
-  // 저장 후 파일 업로드하고 다이얼로그 닫는 함수
+  // Save, upload files, and close dialog function
   const handleSaveAndUpload = async () => {
     try {
-      // 1. 버전 저장
+      // 1. Save version
       await handleAddVersion();
 
-      // 2. 파일이 있을 경우 업로드
-      // if (uploadedFiles.length <= 0) {
-      //   setIsVersionSaved(true);
-      // }
+      // 2. Upload files if any exist
+      if (uploadedFiles.length > 0) {
+        await handleUploadAllFiles();
+      }
 
-      // // 3. 다이얼로그 닫기
+      // 3. Close dialog
       setShowDialog(false);
-
     } catch (error) {
-      console.error('버전 저장 또는 파일 업로드 중 오류:', error);
-      setIsVersionSaved(false);
+      console.error('Error saving version or uploading files:', error);
     }
   };
 
-  // 다이얼로그 닫기 시 호출되는 함수
+  // Dialog close handler
   const handleOpenChange = (open: boolean) => {
-    // 업로드 중이면 업로드 취소 확인
+    // Check if upload is in progress
     if (!open && isUploading) {
       if (cancelUpload) {
-        // 취소 함수가 제공된 경우 실행
+        // Execute cancel function if provided
         cancelUpload();
         toast({
-          title: "업로드 취소됨",
-          description: "파일 업로드가 취소되었습니다.",
+          title: "Upload Canceled",
+          description: "File upload has been canceled.",
           variant: "destructive"
         });
       } else {
-        // 취소 확인
-        if (window.confirm("업로드가 진행 중입니다. 정말 취소하시겠습니까?")) {
+        // Confirm cancellation
+        if (window.confirm("Upload is in progress. Are you sure you want to cancel?")) {
           setShowDialog(false);
           toast({
-            title: "업로드 취소됨",
-            description: "파일 업로드가 취소되었습니다.",
+            title: "Upload Canceled",
+            description: "File upload has been canceled.",
             variant: "destructive"
           });
         } else {
-          // 취소하지 않음 - 다이얼로그 유지
+          // Do not cancel - keep dialog open
           return;
         }
       }
     }
 
-    // 다이얼로그 상태 변경
+    // Update dialog state
     setShowDialog(open);
   };
 
@@ -129,9 +127,9 @@ export default function AddVersionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* 버전 정보 입력 폼 */}
+        {/* Version information input form */}
         <div className="grid gap-4">
-          {/* Code, Name, Status 한 줄로 표시 */}
+          {/* Code, Name, Status in one row */}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <Label htmlFor="versionCode" className="text-xs mb-1 block">
@@ -190,7 +188,7 @@ export default function AddVersionDialog({
             </div>
           </div>
 
-          {/* 파일 업로드 UI - 먼저 표시 */}
+          {/* File upload UI - displayed first */}
           <div className="col-span-3">
             <div
               className="border-2 border-dashed border-gray-300 rounded-md p-6 text-center mb-4 transition-colors duration-200"
@@ -218,7 +216,7 @@ export default function AddVersionDialog({
               </div>
             </div>
 
-            {/* 선택된 파일 목록 */}
+            {/* Selected files list */}
             {uploadedFiles.length > 0 && (
               <div className="mb-4">
                 <div className="text-xs font-medium mb-2">Selected Files ({uploadedFiles.length})</div>
@@ -235,7 +233,7 @@ export default function AddVersionDialog({
                         </div>
                       </div>
 
-                      {/* 업로드 진행률 */}
+                      {/* Upload progress */}
                       {uploadProgress[file.name] && uploadProgress[file.name] > 0 ? (
                         <div className="w-24 bg-gray-200 rounded-full h-1.5 overflow-hidden">
                           <div
@@ -259,7 +257,7 @@ export default function AddVersionDialog({
             )}
           </div>
 
-          {/* 설명 필드를 가장 아래로 이동 */}
+          {/* Description field moved to the bottom */}
           <div className="grid grid-cols-4 items-center gap-4 col-span-3">
             <Textarea
               id="changeLog"
@@ -278,8 +276,8 @@ export default function AddVersionDialog({
               if (isUploading && cancelUpload) {
                 cancelUpload();
                 toast({
-                  title: "업로드 취소됨",
-                  description: "파일 업로드가 취소되었습니다.",
+                  title: "Upload Canceled",
+                  description: "File upload has been canceled.",
                   variant: "destructive"
                 });
               }

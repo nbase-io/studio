@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FolderDown, RefreshCw, Upload, List, Grid, FileX, Download, FileEdit, Clock, Gauge, FolderPlus, ChevronUp, FolderUp, Pencil, Trash2 } from 'lucide-react';
+import { FolderDown, RefreshCw, Upload, List, Grid, Download, Clock, Gauge, FolderPlus,  FolderUp, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -259,7 +259,7 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
             size="icon"
             onClick={onRename}
             disabled={!selectedFile && selectedFiles.length === 0}
-            title="이름 변경"
+            title="Rename"
           >
             <Pencil className="h-4 w-4" />
           </Button>
@@ -270,7 +270,7 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
             size="icon"
             onClick={onDownload}
             disabled={!selectedFile && selectedFiles.length === 0}
-            title="다운로드"
+            title="Download"
           >
             <Download className="h-4 w-4" />
           </Button>
@@ -281,7 +281,7 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
             size="icon"
             onClick={onDelete}
             disabled={!selectedFile && selectedFiles.length === 0}
-            title="삭제"
+            title="Delete"
           >
             <Trash2 className="h-4 w-4" />
           </Button>

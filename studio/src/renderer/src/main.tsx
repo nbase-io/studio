@@ -42,6 +42,9 @@ declare global {
       openDevTools: () => void;
       saveTempFile: (params: { buffer: ArrayBuffer; fileName: string }) => Promise<string>;
       deleteTempFile: (params: { filePath: string }) => Promise<{ success: boolean; error?: string }>;
+      on: (channel: string, listener: (...args: any[]) => void) => any;
+      off: (channel: string, listener: (...args: any[]) => void) => any;
+      checkForUpdates: () => Promise<void>;
     }
   }
 }

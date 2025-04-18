@@ -1,7 +1,5 @@
 import React, { useRef } from 'react';
 import { UploadCloud, FilePlus, File, X, Download, Trash } from 'lucide-react';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
 import { VersionFile } from '@/lib/api';
 
 interface FileUploaderProps {

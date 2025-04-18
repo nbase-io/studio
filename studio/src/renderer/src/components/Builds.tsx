@@ -1416,14 +1416,7 @@ function Builds(): JSX.Element {
               <p className="text-xs text-gray-500">Manage your application builds</p>
             </div>
             <div className="flex space-x-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={toggleDebugPanel}
-                className="h-8 text-xs"
-              >
-                {showDebugPanel ? 'Hide Debug Panel' : 'Show Debug Panel'}
-              </Button>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -1485,7 +1478,7 @@ function Builds(): JSX.Element {
               </Label>
               <Input
                 id="name"
-                placeholder="빌드 이름"
+                placeholder="Build name"
                 className="col-span-3 h-7 text-xs"
                 value={newBuild.name}
                 onChange={(e) => handleInputChange('name', e.target.value)}
@@ -1539,7 +1532,7 @@ function Builds(): JSX.Element {
                 onValueChange={(value) => handleInputChange('platform', value)}
               >
                 <SelectTrigger className="col-span-3 h-7 text-xs">
-                  <SelectValue placeholder="플랫폼 선택" />
+                  <SelectValue placeholder="Select platform" />
                 </SelectTrigger>
                 <SelectContent className="text-xs">
                   <SelectItem value="android">Android</SelectItem>
@@ -1564,7 +1557,7 @@ function Builds(): JSX.Element {
                 onValueChange={(value) => handleInputChange('status', value as 'draft' | 'published' | 'archived' | 'development')}
               >
                 <SelectTrigger className="col-span-3 h-7 text-xs">
-                  <SelectValue placeholder="상태 선택" />
+                  <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent className="text-xs">
                   <SelectItem value="development">Development</SelectItem>
@@ -1581,11 +1574,11 @@ function Builds(): JSX.Element {
             </div>
             <div className="grid grid-cols-4 items-center gap-3">
               <Label htmlFor="description" className="text-right text-xs">
-                설명
+                Description
               </Label>
               <Textarea
                 id="description"
-                placeholder="빌드 설명"
+                placeholder="Build description"
                 className="col-span-3 text-xs min-h-[60px]"
                 value={newBuild.description || ''}
                 onChange={(e) => handleInputChange('description', e.target.value)}

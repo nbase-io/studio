@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: shadcn-electron-app
+appId: com.gamepot.studio
+productName: GamePot Studio
 directories:
   buildResources: build
 files:
@@ -12,12 +12,17 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: shadcn-electron-app
+  executableName: GamePot-Studio
+  target:
+    - nsis
+    - zip
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  oneClick: false
+  allowToChangeInstallationDirectory: true
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -26,6 +31,9 @@ mac:
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
+  target:
+    - dmg
+    - zip
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
@@ -33,13 +41,15 @@ linux:
     - AppImage
     - snap
     - deb
-  maintainer: electronjs.org
+  maintainer: gamepot.com
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
   provider: generic
-  url: https://example.com/auto-updates
+  url: https://your-update-server.com/updates/
+  channel: latest
+  publishAutoUpdate: true
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

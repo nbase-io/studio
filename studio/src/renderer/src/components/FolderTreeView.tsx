@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Folder, ChevronRight, ChevronDown, File } from 'lucide-react';
+import Reactfrom 'react';
+import { Folder, ChevronRight, ChevronDown } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 // 파일/폴더 인터페이스 정의

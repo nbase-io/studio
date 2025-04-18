@@ -1,10 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface UploadResult {
+  success: boolean
+  location?: string
+  error?: string
+}
+
+// API 반환 타입 정의
+interface S3UploadResult {
   success: boolean
   location?: string
   error?: string
@@ -18,35 +25,39 @@ function S3Upload(): JSX.Element {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [bucket, setBucket] = useState<string>('')
 
-  // 컴포넌트 마운트 시 설정에서 버킷 정보 불러오기
-  useState(() => {
+  // Load bucket info when component mounts
+  useEffect(() => {
     loadBucketFromSettings()
-  })
+  }, [])
 
-  // 저장된 설정에서 버킷 정보 불러오기
+  // Load bucket info from saved settings
   const loadBucketFromSettings = async () => {
     try {
-      // @ts-ignore - Window 타입에 api 프로퍼티가 없어서 발생하는 타입 오류 무시
+      // @ts-ignore - Ignore type error since api property doesn't exist on Window type
       const settings = await window.api.loadSettings()
       if (settings) {
-        const parsedSettings = JSON.parse(settings)
-        if (parsedSettings.s3Bucket) {
-          setBucket(parsedSettings.s3Bucket)
+        if (typeof settings === 'string') {
+          const parsedSettings = JSON.parse(settings)
+          if (parsedSettings.s3Bucket && typeof parsedSettings.s3Bucket === 'string') {
+            setBucket(parsedSettings.s3Bucket)
+          }
+        } else if (settings.s3Bucket && typeof settings.s3Bucket === 'string') {
+          setBucket(settings.s3Bucket)
         }
       }
     } catch (error) {
-      console.error('버킷 정보를 불러오는 중 오류가 발생했습니다:', error)
+      console.error('Error loading bucket information:', error)
     }
   }
 
-  // 파일 선택 대화상자 열기
+  // Open file selection dialog
   const handleFileSelect = async () => {
     try {
-      // @ts-ignore - Window 타입에 api 프로퍼티가 없어서 발생하는 타입 오류 무시
+      // @ts-ignore - Ignore type error since api property doesn't exist on Window type
       const filePaths = await window.api.selectFile({
         properties: ['openFile'],
         filters: [
-          { name: '모든 파일', extensions: ['*'] }
+          { name: 'All Files', extensions: ['*'] }
         ]
       })
 
@@ -54,22 +65,22 @@ function S3Upload(): JSX.Element {
         const filePath = filePaths[0]
         setSelectedFile(filePath)
 
-        // 파일 이름 추출
+        // Extract file name
         const fileNameParts = filePath.split(/[\/\\]/)
         const newFileName = fileNameParts[fileNameParts.length - 1]
         setFileName(newFileName)
       }
     } catch (error) {
-      console.error('파일 선택 중 오류가 발생했습니다:', error)
+      console.error('Error selecting file:', error)
     }
   }
 
-  // S3 업로드 수행
+  // Perform S3 upload
   const handleUpload = async () => {
     if (!selectedFile || !bucket) {
       setUploadResult({
         success: false,
-        error: '파일과 버킷을 선택해야 합니다. 환경 설정에서 버킷을 설정하세요.'
+        error: 'File and bucket must be selected. Set the bucket in settings.'
       })
       return
     }
@@ -82,18 +93,18 @@ function S3Upload(): JSX.Element {
         ? `${keyPrefix.replace(/^\/+|\/+$/g, '')}/${fileName}`
         : fileName
 
-      // @ts-ignore - Window 타입에 api 프로퍼티가 없어서 발생하는 타입 오류 무시
-      const result = await window.api.uploadFileToS3(selectedFile, bucket, key)
+      // @ts-ignore - Ignore type error since api property doesn't exist on Window type
+      const result: S3UploadResult = await window.api.uploadFileToS3(selectedFile, bucket, key)
 
       setUploadResult({
         success: result.success,
         location: result.location,
         error: result.error
       })
-    } catch (error) {
+    } catch (error: any) {
       setUploadResult({
         success: false,
-        error: error.message || '업로드 중 오류가 발생했습니다.'
+        error: error.message || 'Error occurred during upload.'
       })
     } finally {
       setUploading(false)
@@ -104,29 +115,29 @@ function S3Upload(): JSX.Element {
     <div className="p-4 h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
         <div>
-          <h1 className="text-xl font-bold">S3 파일 업로드</h1>
-          <p className="text-muted-foreground mt-0.5 text-xs">AWS S3에 파일 업로드</p>
+          <h1 className="text-xl font-bold">S3 File Upload</h1>
+          <p className="text-muted-foreground mt-0.5 text-xs">Upload files to AWS S3</p>
         </div>
       </div>
 
       <Card className="w-full flex-1">
         <CardHeader>
-          <CardTitle className="text-lg">파일 업로드</CardTitle>
+          <CardTitle className="text-lg">File Upload</CardTitle>
           <CardDescription className="text-xs">
-            업로드할 파일을 선택하고 S3에 업로드합니다.
+            Select a file and upload it to S3.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="selectedFile" className="text-xs">선택된 파일</Label>
+              <Label htmlFor="selectedFile" className="text-xs">Selected File</Label>
               <div className="flex items-center gap-2">
                 <Input
                   id="selectedFile"
                   value={selectedFile || ''}
                   readOnly
                   className="h-8 text-xs flex-1"
-                  placeholder="파일을 선택하세요"
+                  placeholder="Select a file"
                 />
                 <Button
                   size="sm"
@@ -134,41 +145,41 @@ function S3Upload(): JSX.Element {
                   onClick={handleFileSelect}
                   className="h-8"
                 >
-                  찾아보기
+                  Browse
                 </Button>
               </div>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="bucket" className="text-xs">S3 버킷</Label>
+              <Label htmlFor="bucket" className="text-xs">S3 Bucket</Label>
               <Input
                 id="bucket"
                 value={bucket}
                 onChange={(e) => setBucket(e.target.value)}
                 className="h-8 text-xs"
-                placeholder="S3 버킷 이름"
+                placeholder="S3 bucket name"
               />
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="keyPrefix" className="text-xs">키 접두사 (폴더 경로)</Label>
+              <Label htmlFor="keyPrefix" className="text-xs">Key Prefix (folder path)</Label>
               <Input
                 id="keyPrefix"
                 value={keyPrefix}
                 onChange={(e) => setKeyPrefix(e.target.value)}
                 className="h-8 text-xs"
-                placeholder="예: uploads/images"
+                placeholder="e.g., uploads/images"
               />
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="fileName" className="text-xs">파일 이름</Label>
+              <Label htmlFor="fileName" className="text-xs">File Name</Label>
               <Input
                 id="fileName"
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
                 className="h-8 text-xs"
-                placeholder="업로드될 파일 이름"
+                placeholder="File name for upload"
               />
             </div>
           </div>
@@ -181,13 +192,13 @@ function S3Upload(): JSX.Element {
             }`}>
               {uploadResult.success ? (
                 <div>
-                  <p className="font-medium">업로드 성공!</p>
-                  <p className="mt-1">파일 URL: {uploadResult.location}</p>
+                  <p className="font-medium">Upload Successful!</p>
+                  <p className="mt-1">File URL: {uploadResult.location}</p>
                 </div>
               ) : (
                 <div>
-                  <p className="font-medium">업로드 실패</p>
-                  <p className="mt-1">오류: {uploadResult.error}</p>
+                  <p className="font-medium">Upload Failed</p>
+                  <p className="mt-1">Error: {uploadResult.error}</p>
                 </div>
               )}
             </div>
@@ -199,7 +210,7 @@ function S3Upload(): JSX.Element {
             onClick={handleUpload}
             disabled={!selectedFile || uploading}
           >
-            {uploading ? '업로드 중...' : 'S3에 업로드'}
+            {uploading ? 'Uploading...' : 'Upload to S3'}
           </Button>
         </CardFooter>
       </Card>

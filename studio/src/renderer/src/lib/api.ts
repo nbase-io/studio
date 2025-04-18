@@ -567,10 +567,10 @@ export class ApiService {
         throw new Error(`Failed to create version: ${response}`);
       }
 
-      const version = response;
+      const version = response.data;
 
       // Apply CDN URL to download URLs
-      if (this.cdnUrl && version?.download_url && !version?.download_url.startsWith('http')) {
+      if (this.cdnUrl && version.download_url && !version.download_url.startsWith('http')) {
         version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
       }
 
@@ -597,7 +597,7 @@ export class ApiService {
       const version = response.data;
 
       // Apply CDN URL to download URLs
-      if (this.cdnUrl && version?.download_url && !version?.download_url.startsWith('http')) {
+      if (this.cdnUrl && version.download_url && !version.download_url.startsWith('http')) {
         version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
       }
 
