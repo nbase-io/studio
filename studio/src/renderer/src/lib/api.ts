@@ -567,7 +567,7 @@ export class ApiService {
         throw new Error(`Failed to create version: ${response}`);
       }
 
-      const version = response.data;
+      const version = response;
 
       // Apply CDN URL to download URLs
       if (this.cdnUrl && version?.download_url && !version?.download_url.startsWith('http')) {
