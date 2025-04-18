@@ -1,9 +1,9 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.png?asset'
-import fs from 'fs'
-import crypto from 'crypto'
+import icon from '../../resources/icon.icns?asset'
+import * as fs from 'fs'
+import * as crypto from 'crypto'
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { tmpdir } from 'os'
 import { autoUpdater } from 'electron-updater'
@@ -15,7 +15,7 @@ const settingsFilePath = join(app.getPath('userData'), 'settings.dat')
 const windowSettingsFilePath = join(app.getPath('userData'), 'window-settings.json')
 
 // 암호화 키 (실제 앱에서는 더 안전한 방법으로 관리해야 합니다)
-const ENCRYPTION_KEY = 'gamelauncher-secure-encryption-key-2024'
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-76f3MHFDIul7xdwIfbWYKuLuVHovNY8G'
 
 // 임시 파일 디렉토리 - 애플리케이션별 임시 디렉토리 생성
 const appTempDir = join(tmpdir(), `gamepot-studio-${Date.now()}`);
@@ -179,12 +179,15 @@ function createWindow(): void {
     // maxWidth: 1600,
     // maxHeight: 1000,
     title: 'GamePot Studio',
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon, // 모든 플랫폼에 아이콘 적용
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      webSecurity: true,
-      allowRunningInsecureContent: false
+      webSecurity: false,
+      allowRunningInsecureContent: true,
+      webviewTag: true,
+      nodeIntegration: true,
+      contextIsolation: true
     }
   })
 
@@ -225,13 +228,13 @@ function createWindow(): void {
     saveWindowSettings(mainWindow);
   });
 
-  // CSP 설정 1: 세션 수준에서 CSP 설정 (모든 요청에 적용)
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+  // 전역 CSP 설정 (모든 창에 적용)
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* https://*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+          "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* https://*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; frame-src 'self' https://dash.gamepot.beta.ntruss.com/;"
         ]
       }
     });
@@ -1134,7 +1137,8 @@ ipcMain.handle('check-for-updates', async () => {
 // 업데이트 체크 함수
 const checkForUpdates = async () => {
   try {
-    const response = await fetch('https://your-username.github.io/your-repo/updates.json')
+    const updateUrl = process.env.UPDATE_URL || 'https://nbase-io.github.io/studio/patches/electron-update.yml'
+    const response = await fetch(updateUrl)
     const data = await response.json()
 
     const currentVersion = app.getVersion()
@@ -1157,6 +1161,13 @@ const checkForUpdates = async () => {
   }
 }
 
+// 앱 버전 정보 요청 처리
+ipcMain.handle('get-app-version', () => {
+  return {
+    version: app.getVersion()
+  };
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -1170,7 +1181,7 @@ app.whenReady().then(() => {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* https://*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline';"
+          "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:* https://*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; frame-src 'self' https://dash.gamepot.beta.ntruss.com/;"
         ]
       }
     });

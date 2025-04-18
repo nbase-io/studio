@@ -4,6 +4,7 @@ import Settings from './components/Settings'
 import DesignEditor from './components/DesignEditor'
 import FileManager from './components/FileManager'
 import UpdateNotification from './components/UpdateNotification'
+import WebViewController from './components/WebViewController'
 import { ErrorDialogProvider, useErrorDialog, setErrorDialogFunction } from './components/ErrorDialog'
 
 // ErrorDialog를 사용하는 내부 컴포넌트
@@ -19,6 +20,8 @@ function AppContent(): JSX.Element {
 
   const renderContent = () => {
     switch (activePage) {
+      // case 'gamepot':
+      //   return <WebViewController defaultUrl="https://dash.gamepot.beta.ntruss.com/demo" />
       case 'builds':
         return <Builds />
       case 'settings':
@@ -36,6 +39,7 @@ function AppContent(): JSX.Element {
     <div className="h-screen flex">
       {/* 왼쪽 사이드바 메뉴 */}
       <div className="w-16 border-r flex flex-col items-center py-4 bg-gray-50">
+
         <button
           className={`p-2 rounded-md flex items-center justify-center mb-4 ${
             activePage === 'builds' ? 'bg-gray-200' : ''

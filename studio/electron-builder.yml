@@ -13,6 +13,7 @@ asarUnpack:
   - resources/**
 win:
   executableName: GamePot-Studio
+  icon: build/icon.ico
   target:
     - nsis
     - zip
@@ -24,6 +25,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 mac:
+  icon: build/icon.icns
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.

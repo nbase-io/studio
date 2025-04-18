@@ -75,3 +75,7 @@ pnpm install
 
 - 현재 버전: 1.0.0
 - 자동 업데이트 지원
+
+## 업데이트 URL 설정 가이드
+
+[업데이트 URL 설정 가이드 확인하기](https://nbase-io.github.io/studio/update-url.md)

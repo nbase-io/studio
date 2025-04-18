@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, shell } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 // Custom APIs for renderer
@@ -11,6 +11,16 @@ const api = {
   // 설정 로드 함수
   loadSettings: (): Promise<any> => {
     return ipcRenderer.invoke('load-settings')
+  },
+
+  // 앱 버전 가져오기
+  getAppVersion: (): Promise<any> => {
+    return ipcRenderer.invoke('get-app-version')
+  },
+
+  // shell API 추가
+  shell: {
+    openExternal: (url: string) => shell.openExternal(url)
   },
 
   // S3 설정 가져오기
