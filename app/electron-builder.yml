@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: shadcn-electron-app
+productName: gamepot-studio-app
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: shadcn-electron-app
+  executableName: gamepot-studio-app
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

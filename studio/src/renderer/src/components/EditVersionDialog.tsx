@@ -95,7 +95,6 @@ export default function EditVersionDialog({
 
     setShowDialog(open);
   };
-  const cdnUrl = JSON.parse(localStorage.getItem('settings') || '{}').cdnUrl || '';
 
   return (
     <Dialog open={showDialog} onOpenChange={handleOpenChange}>

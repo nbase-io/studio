@@ -15,7 +15,7 @@ import { ChevronLeft, Plus, Trash, Edit, Download,  Loader2, RefreshCw, AlertTri
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/components/ui/use-toast'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
+
 import { cn } from '@/lib/utils'
 import { formatFileSize } from '@/lib/utils'
 // 상단에 새로 분리한 컴포넌트들을 임포트
@@ -23,7 +23,7 @@ import AddVersionDialog from './AddVersionDialog';
 import EditVersionDialog from './EditVersionDialog';
 import DeleteVersionDialog from './DeleteVersionDialog';
 import ViewFilesDialog from './ViewFilesDialog';
-import { isError } from 'util'
+
 
 interface VersionManagerProps {
   buildId: string;
@@ -110,13 +110,9 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
   const [isUploading, setIsUploading] = useState<boolean>(false)
   const { toast } = useToast()
-  const [isDragging, setIsDragging] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState<boolean>(false)
   const [fileUploads, setFileUploads] = useState<FileUploadStatus[]>([])
   const [overallProgress, setOverallProgress] = useState<number>(0)
-
-  // 파일 입력 참조 생성
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 파일 목록 대화상자 상태
   const [showFilesDialog, setShowFilesDialog] = useState<boolean>(false);
@@ -962,7 +958,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
 
         try {
           // ArrayBuffer에서 MD5 해시 계산
-          const buffer = event.target.result as ArrayBuffer
+
           // 실제로는 crypto 모듈을 사용하여 MD5 해시 계산
           // 여기서는 모의 구현
           resolve('md5-' + Math.random().toString(36).substring(2, 15))
@@ -1013,24 +1009,24 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     }
   }
 
-  // 업로드 다이얼로그 닫기
-  const handleCloseUploadDialog = () => {
-    // 업로드 중이 아니거나 모든 파일이 완료/에러 상태일 때만 닫기
-    const canClose = !isUploading || fileUploads.every(file =>
-      file.status === 'completed' || file.status === 'error'
-    );
+  // // 업로드 다이얼로그 닫기
+  // const handleCloseUploadDialog = () => {
+  //   // 업로드 중이 아니거나 모든 파일이 완료/에러 상태일 때만 닫기
+  //   const canClose = !isUploading || fileUploads.every(file =>
+  //     file.status === 'completed' || file.status === 'error'
+  //   );
 
-    if (canClose) {
-      setUploadDialogOpen(false);
-      setFileUploads([]);
-      setOverallProgress(0);
-    } else {
-      toast({
-        title: "업로드 중",
-        description: "모든 파일 업로드가 완료될 때까지 기다려주세요.",
-      });
-    }
-  };
+  //   if (canClose) {
+  //     setUploadDialogOpen(false);
+  //     setFileUploads([]);
+  //     setOverallProgress(0);
+  //   } else {
+  //     toast({
+  //       title: "업로드 중",
+  //       description: "모든 파일 업로드가 완료될 때까지 기다려주세요.",
+  //     });
+  //   }
+  // };
 
   // 업로드 취소
   const handleCancelUpload = () => {

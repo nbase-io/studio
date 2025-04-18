@@ -1131,6 +1131,32 @@ ipcMain.handle('check-for-updates', async () => {
   }
 });
 
+// 업데이트 체크 함수
+const checkForUpdates = async () => {
+  try {
+    const response = await fetch('https://your-username.github.io/your-repo/updates.json')
+    const data = await response.json()
+
+    const currentVersion = app.getVersion()
+    if (data.version !== currentVersion) {
+      const dialogOpts: Electron.MessageBoxOptions = {
+        type: 'info',
+        buttons: ['다운로드', '나중에'],
+        title: '업데이트 가능',
+        message: '새로운 버전이 있습니다. 다운로드하시겠습니까?',
+        detail: `현재 버전: ${currentVersion}\n새 버전: ${data.version}`
+      }
+
+      const { response } = await dialog.showMessageBox(dialogOpts)
+      if (response === 0) {
+        shell.openExternal(`https://your-username.github.io/your-repo/${data.path}`)
+      }
+    }
+  } catch (error) {
+    console.error('업데이트 체크 실패:', error)
+  }
+}
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -1178,6 +1204,10 @@ app.whenReady().then(() => {
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+
+  // 1시간마다 업데이트 체크
+  setInterval(checkForUpdates, 60 * 60 * 1000)
+  checkForUpdates()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

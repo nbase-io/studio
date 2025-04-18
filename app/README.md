@@ -1,4 +1,4 @@
-# shadcn-electron-app
+# gamepot-studio-app
 
 ## Installation
 

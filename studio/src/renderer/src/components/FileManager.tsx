@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useToast } from '@/components/ui/use-toast'
 import {
   Dialog,
@@ -9,8 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Loader2, CheckCircle2, AlertCircle, X, File as FileIcon } from 'lucide-react'
-import { Progress } from './ui/progress'
+import { Loader2, CheckCircle2, AlertCircle,File as FileIcon } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '../lib/utils'
 

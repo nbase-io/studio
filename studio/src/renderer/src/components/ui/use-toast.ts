@@ -1,5 +1,5 @@
 // 간단한 Toast 기능 구현 (실제로는 더 복잡한 ToastProvider가 필요)
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 
 export type ToastType = 'default' | 'success' | 'error' | 'warning' | 'destructive'
 

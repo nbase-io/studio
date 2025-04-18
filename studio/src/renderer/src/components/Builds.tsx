@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import BuildsList from './BuildsList'
 import {
   Dialog,
@@ -8,12 +8,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogClose,
   DialogDescription
 } from "@/components/ui/dialog"
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, RefreshCw, Plus, Trash, Edit, Check, X, Upload, Download, FileText, Loader2, ArrowUpIcon, UploadCloud } from "lucide-react"
+import { RefreshCw, Plus, Loader2, UploadCloud } from "lucide-react"
 import { apiService, Build } from '@/lib/api'
 import {
   Select,
@@ -23,32 +22,23 @@ import {
   SelectItem
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-  AlertDialogDescription,
-  AlertDialogTrigger
-} from "@/components/ui/alert-dialog"
+
 import {
   Alert,
   AlertDescription,
-  AlertTitle
 } from "@/components/ui/alert"
 import { useToast } from '@/components/ui/use-toast'
-import BuildForm from './BuildForm'
-import crypto from 'crypto'
 import VersionManager from './VersionManager'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
+// Build 인터페이스에 md5_hash 추가
+interface BuildWithHash extends Build {
+  md5_hash?: string;
+}
+
 function Builds(): JSX.Element {
   const { toast } = useToast()
-  const [versions] = useState(window.electron.process.versions)
-  const [activeTab, setActiveTab] = useState<'list' | 'upload'>('list')
+
   // Dialog state
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   // Selected build and version management screen state
@@ -57,7 +47,7 @@ function Builds(): JSX.Element {
 
   // File upload state
   const [setupFile, setSetupFile] = useState<File | null>(null)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
   const [isUploading, setIsUploading] = useState(false)
   const [fileHash, setFileHash] = useState<string>('')
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
@@ -73,7 +63,7 @@ function Builds(): JSX.Element {
   }>({ connected: false, message: 'Checking server connection status...' })
 
   // New build information
-  const [newBuild, setNewBuild] = useState<Build>({
+  const [newBuild, setNewBuild] = useState<BuildWithHash>({
     name: '',
     version: '1',
     description: '',
@@ -86,26 +76,18 @@ function Builds(): JSX.Element {
   })
 
   // Build list data
-  const [builds, setBuilds] = useState<Build[]>([])
+  const [builds, setBuilds] = useState<BuildWithHash[]>([])
 
   // Edit dialog state
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [editingBuild, setEditingBuild] = useState<Build | null>(null)
+  const [editingBuild, setEditingBuild] = useState<BuildWithHash | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [buildToDelete, setBuildToDelete] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Edit form validation and submission states
-  const [editFormErrors, setEditFormErrors] = useState<{
-    name?: string;
-    version?: string;
-    build_number?: string;
-    platform?: string;
-    status?: string;
-    download_url?: string;
-    build_path?: string;
-  }>({})
+  const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({})
   const [isEditSubmitting, setIsEditSubmitting] = useState(false)
   const [editSubmitError, setEditSubmitError] = useState<string | null>(null)
   const editFileInputRef = useRef<HTMLInputElement>(null)
@@ -123,15 +105,7 @@ function Builds(): JSX.Element {
   const [showAddBuildDialog, setShowAddBuildDialog] = useState(false)
 
   // Form validation errors
-  const [formErrors, setFormErrors] = useState<{
-    name?: string;
-    version?: string;
-    build_number?: string;
-    platform?: string;
-    status?: string;
-    download_url?: string;
-    build_path?: string;
-  }>({})
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
   // Form submission status
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -159,15 +133,14 @@ function Builds(): JSX.Element {
       errors.build_number = 'Build number must be a number';
     }
 
-
     // Don't update errors state if nothing has changed to avoid unnecessary re-renders
-    const currentErrorCount = Object.keys(formErrors).filter(k => !!formErrors[k as keyof typeof formErrors]).length;
-    const newErrorCount = Object.keys(errors).length;
+    const currentErrorCount = Object.values(formErrors).filter(Boolean).length;
+    const newErrorCount = Object.values(errors).filter(Boolean).length;
 
     if (currentErrorCount !== newErrorCount || JSON.stringify(formErrors) !== JSON.stringify(errors)) {
       setFormErrors(errors);
     }
-  }, [newBuild, showAddBuildDialog, setupFile]);
+  }, [newBuild, showAddBuildDialog, setupFile, formErrors]);
 
   // File Upload Zone Component
   const FileUploadZone = () => {
@@ -178,7 +151,10 @@ function Builds(): JSX.Element {
 
       // Calculate file size in MB
       const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
-      setNewBuild(prev => ({ ...prev, size: parseFloat(fileSizeMB) }));
+      setNewBuild(prev => ({
+        ...prev,
+        size: parseFloat(fileSizeMB),
+      }));
 
       // Calculate MD5 hash
       const hash = await generateMD5Hash(file);
@@ -188,18 +164,17 @@ function Builds(): JSX.Element {
       addDebugLog(`File MD5: ${hash}`, 'info');
     };
 
-    const onDragOver = (e: React.DragEvent) => {
+    const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
-    };
-
-    const onDrop = (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         handleFileSelect(e.dataTransfer.files[0]);
       }
+    };
+
+    const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
     };
 
     return (
@@ -224,31 +199,19 @@ function Builds(): JSX.Element {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            onChange={handleFileSelect}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFileSelect(file);
+            }}
             accept=".exe,.dmg,.apk,.zip,.app,.appx,.ipa,.msi"
           />
         </div>
 
         {setupFile && (
-          <div className="mt-2 text-sm">
-            <div className="flex items-center justify-between">
-              <p className="font-medium">{setupFile.name}</p>
-              <p className="text-gray-500">{(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-            </div>
-            {isUploading && (
-              <div className="mt-1">
-                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
-                    style={{ width: `${uploadProgress}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-gray-500 mt-1 text-right">
-                  {uploadProgress < 100 ? `${uploadProgress.toFixed(0)}%` : "처리 중..."}
-                </p>
-              </div>
-            )}
-            {fileHash && <p className="text-gray-500 truncate">MD5: {fileHash}</p>}
+          <div className="mt-2 text-xs">
+            <p className="font-medium">{setupFile.name}</p>
+            <p className="text-gray-500">Size: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+            {fileHash && <p className="text-gray-500 truncate">Hash: {fileHash}</p>}
           </div>
         )}
       </div>
@@ -263,7 +226,7 @@ function Builds(): JSX.Element {
           <DialogHeader>
             <DialogTitle>파일 업로드 중</DialogTitle>
             <DialogDescription>
-              {uploadProgress < 100
+              {Object.keys(uploadProgress).length > 0
                 ? "파일을 서버에 업로드하는 중입니다. 잠시만 기다려주세요."
                 : "업로드가 완료되었습니다!"}
             </DialogDescription>
@@ -272,14 +235,14 @@ function Builds(): JSX.Element {
             <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden dark:bg-gray-700">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
-                  uploadProgress < 100 ? "bg-blue-600" : "bg-green-500"
+                  Object.keys(uploadProgress).length > 0 ? "bg-blue-600" : "bg-green-500"
                 }`}
-                style={{ width: `${uploadProgress}%` }}
+                style={{ width: `${Object.keys(uploadProgress).length > 0 ? Object.values(uploadProgress).reduce((a, b) => a + b) / Object.keys(uploadProgress).length : 0}%` }}
               ></div>
             </div>
             <p className="text-center mt-3 text-sm font-medium text-gray-700 dark:text-gray-300">
-              {uploadProgress < 100
-                ? `${uploadProgress.toFixed(0)}% 완료`
+              {Object.keys(uploadProgress).length > 0
+                ? `${Object.values(uploadProgress).reduce((a, b) => a + b).toFixed(0)}% 완료`
                 : "처리 중..."}
             </p>
             {setupFile && (
@@ -291,7 +254,7 @@ function Builds(): JSX.Element {
             )}
           </div>
           <DialogFooter>
-            {uploadProgress === 100 && (
+            {Object.keys(uploadProgress).length > 0 && (
               <Button
                 onClick={() => setIsUploadDialogOpen(false)}
                 className="w-full sm:w-auto"
@@ -299,7 +262,7 @@ function Builds(): JSX.Element {
                 확인
               </Button>
             )}
-            {uploadProgress < 100 && (
+            {Object.keys(uploadProgress).length > 0 && (
               <Button
                 variant="outline"
                 onClick={() => setIsUploadDialogOpen(false)}
@@ -461,7 +424,7 @@ function Builds(): JSX.Element {
   }
 
   // Handle input change with validation
-  const handleInputChange = (field: keyof Build, value: any) => {
+  const handleInputChange = (field: keyof BuildWithHash, value: any) => {
     // First update the build data
     setNewBuild(prev => ({
       ...prev,
@@ -775,7 +738,10 @@ function Builds(): JSX.Element {
   // 파일 업로드 처리 함수
   const handleFileUpload = async (file: File) => {
     setSetupFile(file);
-    setUploadProgress(0);
+    setUploadProgress(prev => ({
+      ...prev,
+      [file.name]: 0
+    }));
     setIsUploading(true);
 
     const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
@@ -831,37 +797,9 @@ function Builds(): JSX.Element {
 
   // 파일 선택 핸들러 수정
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
-
-    // 파일 크기 제한 (1GB)
-    if (file.size > 1024 * 1024 * 1024) {
-      toast({
-        title: '파일 크기 초과',
-        description: '파일 크기는 1GB를 초과할 수 없습니다.',
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // 파일 크기를 MB로 변환
-    const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
-
-    if (editingBuild) {
-      setEditSetupFile(file);
-      setEditingBuild(prev => ({
-        ...prev!,
-        size: parseFloat(fileSizeInMB)
-      }));
-    } else {
-      setSetupFile(file);
-      setNewBuild(prev => ({
-        ...prev,
-        size: parseFloat(fileSizeInMB)
-      }));
-    }
+    await handleFileUpload(file);
   };
 
   // Add a log to debug panel
@@ -906,7 +844,7 @@ function Builds(): JSX.Element {
 
     // Reset file upload state
     setSetupFile(null);
-    setUploadProgress(0);
+    setUploadProgress({});
     setIsUploading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -1004,7 +942,6 @@ function Builds(): JSX.Element {
   const handleBuildSelect = (buildId: string) => {
     setSelectedBuild(buildId)
     setShowVersionManagement(true)
-    addDebugLog(`버전 관리 화면으로 이동: 빌드 ID ${buildId}`, 'info')
   }
 
   const handleBackToBuildList = () => {
@@ -1012,14 +949,38 @@ function Builds(): JSX.Element {
     setShowVersionManagement(false)
   }
 
-  const handleEditClick = (build: Build, e: React.MouseEvent) => {
-    e.stopPropagation()
-    // Reset edit form states
-    setEditFormErrors({})
-    setEditSubmitError(null)
-    setEditSetupFile(null)
-    setEditingBuild({...build})
-    setIsEditDialogOpen(true)
+  const handleBuildEdit = (build: BuildWithHash) => {
+    if (build.id) {
+      setEditingBuild(build)
+      setIsEditDialogOpen(true)
+    }
+  }
+
+  const handleBuildDelete = (buildId: string) => {
+    setBuildToDelete(buildId)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!buildToDelete) return
+
+    setIsDeleting(true)
+    setDeleteError(null)
+
+    try {
+      await apiService.deleteBuild(buildToDelete)
+      setBuilds(builds.filter(build => build.id !== buildToDelete))
+      setIsDeleteDialogOpen(false)
+      setBuildToDelete(null)
+      toast({
+        title: "Success",
+        description: "Build deleted successfully",
+      })
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete build')
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   // Validate edit form fields
@@ -1043,7 +1004,7 @@ function Builds(): JSX.Element {
   }
 
   // Handle edit input change with validation
-  const handleEditInputChange = (field: keyof Build, value: any) => {
+  const handleEditInputChange = (field: keyof BuildWithHash, value: any) => {
     if (!editingBuild) return;
 
     // First update the build data
@@ -1061,65 +1022,62 @@ function Builds(): JSX.Element {
     }))
   }
 
-  // Handle file selection for edit dialog
+  // Edit file handling
   const handleEditFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!editingBuild) return;
+    if (!editingBuild || !e.target.files?.[0]) return;
 
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      setEditSetupFile(file);
+    const file = e.target.files[0];
+    setEditSetupFile(file);
 
-      // 파일 크기 제한 (1GB)
-      if (file.size > 1024 * 1024 * 1024) {
-        setEditFormErrors({
-          ...editFormErrors,
-          download_url: '파일 크기는 1GB를 초과할 수 없습니다.'
-        });
-        return;
-      }
+    // 파일 크기 제한 (1GB)
+    if (file.size > 1024 * 1024 * 1024) {
+      setEditFormErrors(prev => ({
+        ...prev,
+        download_url: '파일 크기는 1GB를 초과할 수 없습니다.'
+      }));
+      return;
+    }
 
-      // 파일 타입 검증
-      const allowedTypes = ['.exe', '.dmg', '.apk', '.zip', '.app', '.appx', '.ipa', '.msi'];
-      const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-      if (!allowedTypes.includes(fileExtension)) {
-        setEditFormErrors({
-          ...editFormErrors,
-          download_url: '지원하지 않는 파일 형식입니다. 실행 파일을 업로드하세요.'
-        });
-        return;
-      }
+    // 파일 타입 검증
+    const allowedTypes = ['.exe', '.dmg', '.apk', '.zip', '.app', '.appx', '.ipa', '.msi'];
+    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    if (!allowedTypes.includes(fileExtension)) {
+      setEditFormErrors(prev => ({
+        ...prev,
+        download_url: '지원하지 않는 파일 형식입니다.'
+      }));
+      return;
+    }
 
-      // 파일 크기를 MB로 변환
-      const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
+    // 파일 크기 계산
+    const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
 
-      try {
-        // 파일 업로드 시작
-        const { url, md5 } = await uploadFileToS3(file);
+    try {
+      // 파일 업로드 시작
+      const { url, md5 } = await uploadFileToS3(file);
 
-        // 빌드 정보 업데이트
-        setEditingBuild({
-          ...editingBuild,
-          size: parseFloat(fileSizeInMB),
-          download_url: url,
-          md5_hash: md5
-        });
+      // 빌드 정보 업데이트
+      setEditingBuild(prev => ({
+        ...prev!,
+        size: parseFloat(fileSizeInMB),
+        download_url: url,
+        md5_hash: md5
+      }));
 
-        // 에러 초기화
-        setEditFormErrors({
-          ...editFormErrors,
-          download_url: ''
-        });
+      // 에러 초기화
+      setEditFormErrors(prev => ({
+        ...prev,
+        download_url: ''
+      }));
 
-        // 디버그 로그 추가
-        addDebugLog(`수정을 위한 파일 업로드 완료: ${file.name} (${fileSizeInMB} MB)`, 'info');
-      } catch (error) {
-        console.error('파일 업로드 실패:', error);
-        setEditFormErrors({
-          ...editFormErrors,
-          download_url: '파일 업로드에 실패했습니다.'
-        });
-      }
+      addDebugLog(`파일 업로드 완료: ${file.name} (${fileSizeInMB} MB)`, 'success');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setEditFormErrors(prev => ({
+        ...prev,
+        download_url: `파일 업로드 실패: ${errorMessage}`
+      }));
+      addDebugLog(`파일 업로드 실패: ${errorMessage}`, 'error');
     }
   };
 
@@ -1222,105 +1180,6 @@ function Builds(): JSX.Element {
     }
   }
 
-  const handleDeleteClick = (buildId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setBuildToDelete(buildId)
-    setIsDeleteDialogOpen(true)
-  }
-
-  const handleConfirmDelete = async () => {
-    if (!buildToDelete) return
-
-    setIsDeleting(true);
-    setDeleteError(null);
-
-    // Add to debug logs
-    addDebugLog(`API call: DELETE /builds/${buildToDelete}`, 'warning')
-
-    try {
-      // 서버 연결 확인
-      const isConnected = await checkServerConnection();
-      if (!isConnected) {
-        setDeleteError(`Server connection error: ${serverStatus.message}. Unable to delete build.`);
-        setIsDeleting(false);
-        // Keep dialog open for error message
-        return;
-      }
-
-      // 삭제할 빌드 찾기
-      const buildObj = builds.find(b => b.id === buildToDelete);
-      if (buildObj && buildObj.download_url) {
-        // 파일을 S3에서 삭제 시도
-        try {
-          await deleteFileFromS3(buildObj.download_url);
-          addDebugLog(`S3 파일 삭제 완료: ${buildObj.download_url}`, 'success');
-        } catch (error) {
-          // 파일 삭제 실패해도 빌드 삭제는 계속 진행
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          addDebugLog(`S3 파일 삭제 실패 (계속 진행): ${errorMessage}`, 'warning');
-        }
-      } else {
-        addDebugLog('이 빌드에는 연결된 파일이 없습니다', 'info');
-      }
-
-      // API를 통해 빌드 삭제
-      await apiService.deleteBuild(buildToDelete)
-
-      // Add to debug logs
-      addDebugLog(`API response: build deletion success`, 'success')
-
-      await loadBuilds() // Reload builds after deletion
-
-      // Successfully deleted, close dialog
-      setIsDeleteDialogOpen(false)
-      setBuildToDelete(null)
-
-      // 성공 메시지 표시
-      toast({
-        description: "빌드가 성공적으로 삭제되었습니다",
-        variant: "default"
-      });
-    } catch (err) {
-      console.error('Failed to delete build:', err)
-
-      // 구체적인 오류 메시지 설정
-      const errorMessage = err instanceof Error ? err.message : String(err)
-      setDeleteError(`Build deletion failed: ${errorMessage}`);
-
-      // Add to debug logs with more details
-      addDebugLog(`API error: ${errorMessage}`, 'error')
-
-      // Add detailed error information if available
-      if (errorMessage.includes('API Error')) {
-        const statusMatch = errorMessage.match(/API Error \((\d+)\)/)
-        const status = statusMatch ? statusMatch[1] : 'unknown'
-        addDebugLog(`status code: ${status}`, 'error')
-
-        const responseText = errorMessage.replace(/API Error \(\d+\): /, '')
-        addDebugLog(`response content: ${responseText}`, 'error')
-
-        if (status === '404') {
-          addDebugLog(`build not found: it may have been deleted or does not exist`, 'error')
-        } else if (status === '401' || status === '403') {
-          addDebugLog(`authentication error: please check the API key and project ID`, 'error')
-        }
-      } else if (errorMessage.includes('Failed to fetch')) {
-        addDebugLog('network connection problem or CORS error occurred', 'error')
-        addDebugLog(`server settings check needed: ${localStorage.getItem('settings') ? JSON.parse(localStorage.getItem('settings') || '{}').serverUrl || 'not set' : 'not set'}`, 'error')
-      }
-
-      // 오류 메시지 표시
-      toast({
-        description: `빌드 삭제 실패: ${errorMessage}`,
-        variant: "destructive"
-      });
-
-      // Keep dialog open for error message
-    } finally {
-      setIsDeleting(false);
-    }
-  }
-
   const formatDate = (dateString?: string) => {
     if (!dateString) return '-'
     return new Date(dateString).toLocaleString()
@@ -1376,7 +1235,7 @@ function Builds(): JSX.Element {
 
     // 직접 파일 입력 필드 초기화
     setSetupFile(null);
-    setUploadProgress(0);
+    setUploadProgress({});
     setIsUploading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -1397,7 +1256,7 @@ function Builds(): JSX.Element {
 
     // 파일 입력 필드 초기화
     setSetupFile(null);
-    setUploadProgress(0);
+    setUploadProgress({});
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -1416,7 +1275,6 @@ function Builds(): JSX.Element {
               <p className="text-xs text-gray-500">Manage your application builds</p>
             </div>
             <div className="flex space-x-2">
-
               <Button
                 variant="outline"
                 size="sm"
@@ -1443,19 +1301,18 @@ function Builds(): JSX.Element {
               <CardContent className="p-0">
                 <BuildsList
                   key={buildListKey}
-                  builds={builds}
+                  items={builds}
                   loading={loading}
                   error={error}
                   onBuildSelect={handleBuildSelect}
                   onSelect={handleBuildSelect}
-                  onEdit={handleEditClick}
-                  onDelete={handleDeleteClick}
+                  onEdit={handleBuildEdit}
+                  onDelete={handleBuildDelete}
                   serverStatus={serverStatus}
                 />
               </CardContent>
             </Card>
           </ScrollArea>
-
         </>
       )}
 
@@ -1486,7 +1343,7 @@ function Builds(): JSX.Element {
               {formErrors.name && (
                 <div className="col-span-3 col-start-2 text-xs text-red-500">
                   {formErrors.name}
-            </div>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-4 items-center gap-3">
@@ -1503,7 +1360,7 @@ function Builds(): JSX.Element {
               {formErrors.version && (
                 <div className="col-span-3 col-start-2 text-xs text-red-500">
                   {formErrors.version}
-            </div>
+                </div>
               )}
             </div>
             <div className="grid grid-cols-4 items-center gap-3">
@@ -1642,7 +1499,11 @@ function Builds(): JSX.Element {
             }} className="h-7 text-xs">
               취소
             </Button>
-            <Button onClick={handleAddBuild} disabled={isSubmitting || Object.keys(formErrors).some(k => !!formErrors[k as keyof typeof formErrors])} className="h-7 text-xs">
+            <Button
+              onClick={handleAddBuild}
+              disabled={isSubmitting || Object.values(formErrors).some(Boolean)}
+              className="h-7 text-xs"
+            >
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-3 w-3 animate-spin" />
@@ -1787,8 +1648,8 @@ function Builds(): JSX.Element {
                 {editFormErrors.status && (
                   <div className="col-span-3 col-start-2 text-red-500 text-xs mt-0.5">
                     {editFormErrors.status}
-            </div>
-          )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-4 items-start gap-3">
@@ -1869,7 +1730,7 @@ function Builds(): JSX.Element {
                 {editFormErrors.build_path && (
                   <div className="col-span-3 col-start-2 text-red-500 text-xs mt-0.5">
                     {editFormErrors.build_path}
-          </div>
+                  </div>
                 )}
               </div>
 
@@ -1921,7 +1782,7 @@ function Builds(): JSX.Element {
               Cancel
             </Button>
                 <div className="flex flex-col items-end">
-                  {Object.keys(editFormErrors).some(key => !!editFormErrors[key as keyof typeof editFormErrors]) && (
+                  {Object.values(editFormErrors).some(Boolean) && (
                     <div className="text-red-500 text-xs mb-1">
                       Please fix the errors before submitting
                     </div>
@@ -1934,12 +1795,12 @@ function Builds(): JSX.Element {
                       !editingBuild.version ||
                       isEditSubmitting ||
                       !serverStatus.connected ||
-                      Object.keys(editFormErrors).some(key => !!editFormErrors[key as keyof typeof editFormErrors])
+                      Object.values(editFormErrors).some(Boolean)
                     }
                     className="h-7 text-xs py-0"
                   >
                     {isEditSubmitting ? 'Updating...' : 'Update Build'}
-            </Button>
+                  </Button>
                 </div>
               </div>
             </div>

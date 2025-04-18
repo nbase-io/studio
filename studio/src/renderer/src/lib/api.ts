@@ -18,6 +18,7 @@ export interface Build {
   build_number?: number;
   platform?: string;
   build_path?: string;
+  md5_hash?: string;
 }
 
 /**
