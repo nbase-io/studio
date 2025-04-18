@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { Download, MoreHorizontal, Copy, Edit, Smartphone, Monitor, Tv, Apple, Globe, Gamepad } from 'lucide-react'
+import { Download, MoreHorizontal, Copy, Edit, Trash, Smartphone, Monitor, Tv, Apple, Globe, Gamepad } from 'lucide-react'
 import { apiService } from '@/lib/api'
 import { Build } from '@/lib/api'
 
@@ -62,6 +62,7 @@ const BuildsList: React.FC<BuildsListProps> = ({
   error,
   onBuildSelect,
   onEdit,
+  onDelete
 }) => {
   const [showDeleteDialog, setShowDeleteDialog] = useState<boolean>(false)
   const [buildToDelete, setBuildToDelete] = useState<string | null>(null)
@@ -77,11 +78,21 @@ const BuildsList: React.FC<BuildsListProps> = ({
     }
   }
 
+  const handleDeleteClick = (buildId: string | undefined, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (buildId) {
+      setBuildToDelete(buildId)
+      setShowDeleteDialog(true)
+    }
+  }
+
   const handleDeleteConfirm = async () => {
     if (!buildToDelete) return
 
     try {
       await apiService.deleteBuild(buildToDelete)
+      // 삭제 후 부모 컴포넌트에 알림
+      onDelete(buildToDelete)
       setShowDeleteDialog(false)
       setBuildToDelete(null)
     } catch (err) {
@@ -127,114 +138,107 @@ const BuildsList: React.FC<BuildsListProps> = ({
 
   return (
     <div className="w-full p-4">
-      {items.map((build) => (
-        <Card
-          key={build.id}
-          className="bg-white text-gray-800 border border-gray-200 overflow-hidden rounded-md hover:bg-gray-50 transition-colors shadow-md"
-        >
-          <div className="p-4">
-            <div className="flex justify-between items-center mb-2">
-              <h3
-                className="font-semibold text-gray-900 text-md cursor-pointer hover:text-blue-600"
-                onClick={() => handleBuildClick(build)}
-              >
-                {build.name}
-              </h3>
-              <div className="flex space-x-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-gray-400 hover:text-gray-800 p-0 h-5 w-5"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditClick(build, e);
-                  }}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {items.map((build) => (
+          <Card
+            key={build.id}
+            className="bg-white text-gray-800 border border-gray-200 overflow-hidden rounded-md hover:bg-gray-50 transition-colors shadow-sm"
+          >
+            <div className="p-3">
+              <div className="flex justify-between items-center mb-2">
+                <h3
+                  className="font-semibold text-gray-900 text-sm cursor-pointer hover:text-blue-600 truncate"
+                  onClick={() => handleBuildClick(build)}
                 >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mb-3 border-b border-gray-100 pb-3">
-              <div className="flex items-center">
-                {getPlatformIcon(build.platform)}
-                <span className="text-gray-700 font-medium text-xs">{capitalizeFirstLetter(build.platform)}</span>
-              </div>
-              <span className={getStatusBadge(build.status)}>{capitalizeFirstLetter(build.status)}</span>
-            </div>
-
-            <Button
-              className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium py-2 px-4 flex items-center justify-center h-10 mb-3 rounded-md"
-              onClick={(e) => handleDownload(e, build.download_url)}
-              disabled={!build.download_url}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Download
-            </Button>
-
-            <div className="text-gray-700 text-sm font-medium text-center mb-3">
-              {build.size || '0 MB'}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              <div>
-                <div className="text-gray-500 mb-1">Version</div>
-                <div className="text-gray-800">
-                  {formatDate(build.updatedAt)}
+                  {build.name}
+                </h3>
+                <div className="flex space-x-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-gray-400 hover:text-red-600 p-0 h-5 w-5"
+                    onClick={(e) => handleDeleteClick(build.id, e)}
+                  >
+                    <Trash className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-gray-400 hover:text-gray-800 p-0 h-5 w-5"
+                    onClick={(e) => handleEditClick(build, e)}
+                  >
+                    <Edit className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
-              <div>
-                <div className="text-gray-500 mb-1">ID</div>
+
+              <div className="flex items-center gap-2 mb-2 border-b border-gray-100 pb-2">
                 <div className="flex items-center">
-                  <span className="text-blue-500 mr-1 truncate overflow-hidden">{build.id || "None"}</span>
-                  {build.id && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-4 w-4 p-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(build.id || '');
-                      }}
-                    >
-                      <Copy className="h-3 w-3 text-blue-500" />
-                    </Button>
-                  )}
+                  {getPlatformIcon(build.platform)}
+                  <span className="text-gray-700 font-medium text-xs">{capitalizeFirstLetter(build.platform)}</span>
+                </div>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full ${getStatusBadge(build.status)}`}>{capitalizeFirstLetter(build.status)}</span>
+              </div>
+
+              <Button
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center rounded-sm h-8 text-xs"
+                onClick={(e) => handleDownload(e, build.download_url)}
+                disabled={!build.download_url}
+              >
+                <Download className="h-2.5 w-2.5 mr-0.5" />
+                Download
+              </Button>
+
+              <div className="text-gray-700 text-xs font-medium text-center mb-2">
+                {build.size ? `${build.size} MB` : '0 MB'}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <div className="text-gray-500 mb-1 text-[10px]">Version</div>
+                  <div className="text-gray-800 text-[10px]">
+                    {build.version || "None"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500 mb-1 text-[10px]">Updated</div>
+                  <div className="text-gray-800 text-[10px] truncate">
+                    {build.updatedAt ? new Date(build.updatedAt).toLocaleDateString() : "None"}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </Card>
-      ))}
+          </Card>
+        ))}
+      </div>
 
-      {showDeleteDialog && (
-        <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Confirm Deletion</DialogTitle>
-              <DialogDescription>
-                Are you sure you want to delete this build? This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowDeleteDialog(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleDeleteConfirm}
-              >
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* 삭제 확인 다이얼로그 */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>빌드 삭제 확인</DialogTitle>
+            <DialogDescription>
+              이 빌드를 정말 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDeleteDialog(false)}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDeleteConfirm}
+            >
+              삭제
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

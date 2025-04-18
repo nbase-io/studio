@@ -25,12 +25,56 @@ interface TestResult {
   error?: string;
 }
 
+// CSS로 스위치 컴포넌트 구현 (Radix UI를 사용하지 않는 간단한 버전)
+const ToggleSwitch = ({
+  checked,
+  onChange,
+  label,
+  description
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  description?: string;
+}) => {
+  return (
+    <div className="flex items-center justify-between p-2 rounded-md">
+      <div className="space-y-0.5">
+        <div className="text-sm font-medium">{label}</div>
+        {description && <div className="text-xs text-gray-500">{description}</div>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+          checked ? 'bg-blue-600' : 'bg-gray-300'
+        }`}
+        onClick={() => onChange(!checked)}
+      >
+        <span
+          className={`${
+            checked ? 'translate-x-5' : 'translate-x-1'
+          } inline-block h-3 w-3 transform rounded-full bg-white transition-transform`}
+        />
+      </button>
+    </div>
+  );
+};
+
 function Settings(): JSX.Element {
   // 글로벌 설정 컨텍스트 사용
   const { settings: globalSettings, loading: globalLoading, saveSettings: saveGlobalSettings } = useSettings();
 
   // 로그인 화면 상태
   const [showLoginDialog, setShowLoginDialog] = useState(false);
+
+  // 베타 환경 선택 상태 (기본값: false = 리얼 환경)
+  const [isBetaEnv, setIsBetaEnv] = useState(false);
+
+  // API 서버 주소 상수
+  const API_URL_REAL = 'https://plugin.gamepot.ntruss.com';
+  const API_URL_BETA = 'https://dev-plugin.gamepot.io';
 
   // 로컬 상태 - 수정 중인 설정을 위한 상태
   const [settings, setSettings] = useState({
@@ -58,9 +102,23 @@ function Settings(): JSX.Element {
   const [showBuildsErrorDialog, setShowBuildsErrorDialog] = useState(false)
   const [buildsError, setBuildsError] = useState<string>("")
 
+  // 환경 변경 시 서버 URL 자동 업데이트
+  useEffect(() => {
+    const serverUrl = isBetaEnv ? API_URL_BETA : API_URL_REAL;
+    setSettings(prev => ({
+      ...prev,
+      serverUrl
+    }));
+  }, [isBetaEnv]);
+
   // 글로벌 설정이 로드되면 로컬 상태에 적용
   useEffect(() => {
     if (!globalLoading && globalSettings) {
+      const storedServerUrl = globalSettings.serverUrl || API_URL_REAL;
+      // 서버 URL로 베타 환경 여부 결정
+      const isBeta = storedServerUrl === API_URL_BETA;
+      setIsBetaEnv(isBeta);
+
       setSettings({
         accessKey: globalSettings.accessKey || '',
         secretKey: globalSettings.secretKey || '',
@@ -68,7 +126,7 @@ function Settings(): JSX.Element {
         s3Bucket: globalSettings.s3Bucket || '',
         projectId: globalSettings.projectId || '',
         apiKey: globalSettings.apiKey || '',
-        serverUrl: globalSettings.serverUrl || 'https://plugin.gamepot.ntruss.com',
+        serverUrl: storedServerUrl,
         cdnUrl: globalSettings.cdnUrl || '',
         endpointUrl: typeof globalSettings.endpointUrl === 'string' ? globalSettings.endpointUrl : ''
       });
@@ -97,6 +155,12 @@ function Settings(): JSX.Element {
       [key]: value
     }))
   }
+
+  // 환경 변경 핸들러
+  const handleEnvironmentChange = (isChecked: boolean) => {
+    setIsBetaEnv(isChecked);
+    // 환경 변경 시 서버 URL도 자동 변경 (useEffect에서 처리)
+  };
 
   // 설정 저장 함수
   const saveSettings = async () => {
@@ -140,6 +204,10 @@ function Settings(): JSX.Element {
       const savedSettings = await window.api.loadSettings()
 
       if (savedSettings) {
+        // 서버 URL로 베타 환경 여부 결정
+        const isBeta = savedSettings.serverUrl === API_URL_BETA;
+        setIsBetaEnv(isBeta);
+
         setSettings(prev => ({
           ...prev,
           ...savedSettings
@@ -280,6 +348,22 @@ function Settings(): JSX.Element {
 
       <ScrollArea className="h-[calc(100vh-8rem)]">
         <div className="flex flex-col space-y-6">
+          {/* API 환경 설정 카드 */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold">환경 설정</CardTitle>
+              <CardDescription className="text-xs">API 환경을 선택하세요.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <ToggleSwitch
+                checked={isBetaEnv}
+                onChange={handleEnvironmentChange}
+                label={isBetaEnv ? "베타 환경" : "리얼 환경"}
+                description={`현재 API 주소: ${settings.serverUrl}`}
+              />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold">API Configuration</CardTitle>
@@ -322,6 +406,20 @@ function Settings(): JSX.Element {
                     type="password"
                   />
                 </div>
+              </div>
+              <div>
+                <Label htmlFor="serverUrl" className="text-xs">서버 URL</Label>
+                <Input
+                  id="serverUrl"
+                  value={settings.serverUrl}
+                  onChange={(e) => handleInputChange('serverUrl', e.target.value)}
+                  className="h-8 text-xs"
+                  placeholder="https://plugin.gamepot.ntruss.com"
+                  disabled={true} // 환경 스위치로 자동 설정되므로 직접 수정 불가
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  * 환경 설정에 따라 자동으로 설정됩니다.
+                </p>
               </div>
             </CardContent>
           </Card>

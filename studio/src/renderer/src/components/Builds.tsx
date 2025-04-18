@@ -968,16 +968,35 @@ function Builds(): JSX.Element {
     setDeleteError(null)
 
     try {
+      // 빌드의 다운로드 URL 확인
+      const buildToBeDeleted = builds.find(build => build.id === buildToDelete);
+
+      // 먼저 API를 통해 서버에서 빌드 삭제
       await apiService.deleteBuild(buildToDelete)
+
+      // 상태 업데이트하여 UI에서 즉시 삭제된 것을 반영
       setBuilds(builds.filter(build => build.id !== buildToDelete))
+
+      // S3에서도 파일 삭제 시도
+      if (buildToBeDeleted?.download_url) {
+        try {
+          await deleteFileFromS3(buildToBeDeleted.download_url);
+        } catch (s3Error) {
+          // S3 삭제 오류는 로그만 남기고 진행 (빌드 자체는 삭제되었으므로)
+          console.warn('S3 file deletion failed:', s3Error);
+          addDebugLog('S3 파일 삭제 실패: ' + (s3Error instanceof Error ? s3Error.message : String(s3Error)), 'warning');
+        }
+      }
+
       setIsDeleteDialogOpen(false)
       setBuildToDelete(null)
       toast({
-        title: "Success",
-        description: "Build deleted successfully",
+        title: "성공",
+        description: "빌드가 성공적으로 삭제되었습니다.",
       })
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Failed to delete build')
+      setDeleteError(error instanceof Error ? error.message : '빌드 삭제 실패')
+      addDebugLog('빌드 삭제 실패: ' + (error instanceof Error ? error.message : String(error)), 'error');
     } finally {
       setIsDeleting(false)
     }
@@ -1808,6 +1827,48 @@ function Builds(): JSX.Element {
         </DialogContent>
       </Dialog>
 
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>빌드 삭제 확인</DialogTitle>
+            <DialogDescription>
+              이 빌드를 정말 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm">
+              <p className="font-semibold">오류 발생:</p>
+              <p>{deleteError}</p>
+            </div>
+          )}
+          <DialogFooter className="flex space-x-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsDeleteDialogOpen(false)}
+              disabled={isDeleting}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                  <span>삭제 중...</span>
+                </>
+              ) : (
+                <span>삭제</span>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   )
