@@ -1,0 +1,11 @@
+provider: github
+owner: osoriz
+repo: studio
+releaseType: draft
+publishAutoUpdate: true
+updateConfig:
+  channel: latest
+  autoDownload: true
+  autoInstallOnAppQuit: true
+  allowDowngrade: false
+  fullChangelog: true
