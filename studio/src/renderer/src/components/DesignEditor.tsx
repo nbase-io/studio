@@ -7,7 +7,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useToast } from '@/components/ui/use-toast'
 import { Loader2, UploadCloud, X, Image as ImageIcon } from 'lucide-react'
-
+import { apiService, Environment, ThemeConfig } from '@/lib/api'
+import { getS3Config, generateMD5Hash } from '@/lib/utils'
+import { useSettings } from '@/main'
 interface ThemeColors {
   primary: string
   secondary: string
@@ -18,12 +20,6 @@ interface ThemeColors {
   border: string
 }
 
-interface ThemeConfig {
-  colors: ThemeColors
-  backgroundImage: string
-  titleColor: string
-}
-
 interface S3Config {
   bucket: string
   region: string
@@ -31,13 +27,7 @@ interface S3Config {
   secretAccessKey: string
 }
 
-interface Environment {
-  id?: string;
-  data: ThemeConfig;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
+// defaultTheme 정의 추가
 const defaultTheme: ThemeConfig = {
   colors: {
     primary: '#0070f3',
@@ -60,8 +50,7 @@ function DesignEditor(): JSX.Element {
   const [jsonOutput, setJsonOutput] = useState<string>('')
   const [showJsonDialog, setShowJsonDialog] = useState<boolean>(false)
   const [isUploading, setIsUploading] = useState<boolean>(false)
-  const [uploadProgress, setUploadProgress] = useState<number>(0)
-  const [cdnUrl, setCdnUrl] = useState<string>('')
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showImageUploadDialog, setShowImageUploadDialog] = useState<boolean>(false)
@@ -69,85 +58,67 @@ function DesignEditor(): JSX.Element {
   const [currentEnvironment, setCurrentEnvironment] = useState<Environment | null>(null)
   const [isSaving, setIsSaving] = useState<boolean>(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Get S3 configuration function
-  const getS3Config = async () => {
-    try {
-      if (!window.api || typeof window.api.getS3Config !== 'function') {
-        console.error('window.api.getS3Config function is not defined.');
-
-        // Get information from localStorage (alternative method)
-        const settings = JSON.parse(localStorage.getItem('settings') || '{}');
-        return {
-          bucket: settings.bucketName || 'my-default-bucket',
-          accessKeyId: settings.accessKey || '',
-          secretAccessKey: settings.secretKey || '',
-          region: settings.region || 'ap-northeast-2',
-          cdnUrl: settings.cdnUrl || ''
-        };
-      }
-
-      const config = await window.api.getS3Config();
-      if (!config) {
-        throw new Error('Failed to get S3 configuration');
-      }
-
-      return config;
-    } catch (error) {
-      console.error('S3 configuration error:', error);
-      toast({
-        title: 'S3 Configuration Error',
-        description: 'An error occurred while getting settings. Using default values.'
-      });
-
-      // Return default values on error
-      return {
-        cdnUrl: ''
-      };
-    }
-  };
-
+  const { settings } = useSettings();
   // Fetch environments from API
   const fetchEnvironments = async () => {
     try {
-      const response = await fetch('/v1/studio/environments');
-      if (!response.ok) {
-        throw new Error('Failed to fetch environments');
-      }
-
-      const data = await response.json();
-      setEnvironments(data);
+      const environments = await apiService.fetchEnvironments();
+      setEnvironments(environments);
 
       // Set current environment if available
-      if (data.length > 0) {
-        const currentEnv = data[0];
+      if (environments.length > 0) {
+        const currentEnv = environments[0];
         setCurrentEnvironment(currentEnv);
-        setTheme(currentEnv.theme);
-        setEnvironmentName(currentEnv.name);
+        setTheme(currentEnv.data);
+
+        // 오브젝트 스토리지에서 이미지 가져오기
+        if (currentEnv.data.backgroundImage) {
+          if (currentEnv.data.backgroundImage.startsWith('data:')) {
+            // 이미 data URL인 경우 그대로 사용
+            setPreviewImage(currentEnv.data.backgroundImage);
+          } else {
+            try {
+              // S3 설정 가져오기
+              const s3Config = await getS3Config();
+              if (!s3Config) throw new Error('S3 설정을 가져올 수 없습니다');
+
+              // 상대 경로인 경우 전체 URL 구성
+              let imageUrl = currentEnv.data.backgroundImage;
+              if (imageUrl.startsWith('/')) {
+                // CDN URL이 있으면 사용, 없으면 endpointUrl 사용
+                const baseUrl = settings.cdnUrl || s3Config.endpointUrl;
+                imageUrl = `${baseUrl}${imageUrl}`;
+              }
+
+              // 이미지를 Fetch API로 가져와서 blob으로 변환
+              const response = await fetch(imageUrl, { mode: 'no-cors' });
+              const blob = await response.blob();
+
+              // Blob을 Base64로 변환
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const dataUrl = e.target?.result as string;
+                setPreviewImage(dataUrl);
+              };
+              reader.readAsDataURL(blob);
+            } catch (error) {
+              console.error('이미지 가져오기 실패:', error);
+              // 이미지 가져오기 실패 시 기본 이미지 사용
+              setPreviewImage(defaultTheme.backgroundImage);
+              toast({
+                title: '이미지 로드 실패',
+                description: '오브젝트 스토리지에서 이미지를 가져오는데 실패했습니다.',
+                variant: 'destructive'
+              });
+            }
+          }
+        } else {
+          // 이미지 URL이 없는 경우 기본 이미지 사용
+          setPreviewImage(defaultTheme.backgroundImage);
+        }
 
         // Update preview styles after setting the theme
-        setPreviewStyle({
-          backgroundColor: currentEnv.theme.colors.background,
-          color: currentEnv.theme.colors.text,
-          borderColor: currentEnv.theme.colors.border,
-          borderWidth: '1px',
-          borderStyle: 'solid',
-          padding: '0',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '600px',
-          overflow: 'hidden'
-        });
-
-        setButtonStyle({
-          backgroundColor: currentEnv.theme.colors.primary,
-          color: currentEnv.theme.colors.buttonText,
-          border: 'none',
-          padding: '0.5rem 1.5rem',
-          borderRadius: '0.25rem',
-          cursor: 'pointer',
-          fontWeight: '500'
-        });
+        updatePreviewStyles(currentEnv.data);
       }
     } catch (error) {
       console.error('Error fetching environments:', error);
@@ -161,20 +132,9 @@ function DesignEditor(): JSX.Element {
 
   // Initial CDN URL loading
   useEffect(() => {
-    const loadCdnUrl = async () => {
-      try {
-        const config = await getS3Config();
-        if (config && config.cdnUrl) {
-          setCdnUrl(config.cdnUrl);
-        } else {
-          console.log('CDN URL is not set. Using default image.');
-        }
-      } catch (error) {
-        console.error('CDN URL loading error:', error);
-      }
-    };
 
-    loadCdnUrl();
+    // 설정에서 로그인 정보 가져오기
+
     fetchEnvironments(); // Load saved environments on component mount
   }, []);
 
@@ -203,6 +163,145 @@ function DesignEditor(): JSX.Element {
       [key]: value
     })
   }
+
+  // S3 업로드 함수
+  const uploadFileToS3 = async (file: File): Promise<{ url: string, md5: string }> => {
+    let tempFilePath: string | null = null;
+
+    try {
+      setIsUploading(true);
+      const s3Config = await getS3Config();
+      if (!s3Config) {
+        toast({
+          title: 'S3 설정 오류',
+          description: 'S3 설정을 가져올 수 없습니다',
+          variant: "destructive"
+        });
+        setIsUploading(false);
+        throw new Error('S3 설정을 가져올 수 없습니다');
+      }
+
+      const { bucket, region, accessKeyId, secretAccessKey, endpointUrl } = s3Config;
+
+      // 랜덤 4자리 문자열 생성
+      const randomPrefix = Math.random().toString(36).substring(2, 6);
+
+      // 파일 이름에서 확장자 추출
+      const originalName = file.name;
+      const fileExtension = originalName.includes('.') ?
+        originalName.substring(originalName.lastIndexOf('.')) : '';
+      const fileNameWithoutExt = originalName.includes('.') ?
+        originalName.substring(0, originalName.lastIndexOf('.')) : originalName;
+
+      // 새 파일 이름 생성 (xxxx_파일명.확장자)
+      const newFileName = `${settings.projectId}_background.${fileExtension}`;
+      const key = `themes/${newFileName}`;
+
+      // 임시 파일 생성
+      tempFilePath = await window.api.createTempFile({
+        fileName: file.name,
+        totalSize: file.size
+      });
+
+      if (!tempFilePath) {
+        toast({
+          title: '파일 생성 오류',
+          description: '임시 파일 생성 실패',
+          variant: "destructive"
+        });
+        setIsUploading(false);
+        throw new Error('임시 파일 생성 실패');
+      }
+
+      // 파일을 한 번에 업로드
+      const buffer = await file.arrayBuffer();
+      const result = await window.api.appendToTempFile({
+        filePath: tempFilePath,
+        buffer,
+        offset: 0
+      });
+
+      if (!result.success) {
+        console.error('파일 업로드 실패:', result.error);
+        toast({
+          title: '파일 업로드 오류',
+          description: `파일 업로드 실패: ${result.error}`,
+          variant: "destructive"
+        });
+        setIsUploading(false);
+        throw new Error(result.error);
+      }
+
+      // 진행률 표시 (50%)
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 50
+      }));
+
+      // 임시 파일을 S3에 업로드
+      const uploadResult = await window.api.uploadFileToS3({
+        filePath: tempFilePath,
+        bucket,
+        key,
+        accessKeyId,
+        secretAccessKey,
+        region,
+        endpointUrl
+      });
+
+      if (!uploadResult.success) {
+        console.error('S3 업로드 실패:', uploadResult.error);
+        toast({
+          title: 'S3 업로드 오류',
+          description: `S3 업로드 실패: ${uploadResult.error}`,
+          variant: "destructive"
+        });
+        setIsUploading(false);
+        throw new Error(uploadResult.error);
+      }
+
+      // S3 업로드 완료 시 진행률 100%로 설정
+      setUploadProgress(prev => ({
+        ...prev,
+        [file.name]: 100
+      }));
+
+      console.log(`S3 업로드 완료: ${file.name} -> ${key}`);
+
+      // 파일 정보 준비
+      const fileUrl = `/${key}`;
+
+      // MD5 해시 계산
+      console.log(`MD5 해시 계산 중: ${file.name}`);
+      const md5Hash = await generateMD5Hash(file);
+      console.log(`MD5 해시 완료: ${md5Hash}`);
+
+      return {
+        url: fileUrl,
+        md5: md5Hash
+      };
+    } catch (error) {
+      console.error('파일 업로드 중 오류:', error);
+      toast({
+        title: '업로드 오류',
+        description: `파일 업로드 실패: ${error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다'}`,
+        variant: "destructive"
+      });
+      throw error;
+    } finally {
+      // 임시 파일 삭제 시도
+      if (tempFilePath) {
+        try {
+          await window.api.deleteTempFile({ filePath: tempFilePath });
+          console.log(`임시 파일 삭제 완료: ${tempFilePath}`);
+        } catch (deleteError) {
+          console.warn(`임시 파일 삭제 실패: ${tempFilePath}`, deleteError);
+        }
+      }
+
+      setIsUploading(false);
+    }
+  };
 
   const updatePreviewStyles = (themeData: ThemeConfig) => {
     setPreviewStyle({
@@ -242,6 +341,7 @@ function DesignEditor(): JSX.Element {
     fileInputRef.current?.click()
   }
 
+
   // Image upload handler
   const handleImageUpload = async (file: File) => {
     setIsUploading(true)
@@ -273,13 +373,13 @@ function DesignEditor(): JSX.Element {
       // Create preview
       const reader = new FileReader()
       reader.onload = (e) => {
-        setPreviewImage(e.target?.result as string)
+        const dataUrl = e.target?.result as string;
+        setPreviewImage(dataUrl)
+        // Update theme with the data URL
+        updateThemeProperty('backgroundImage', dataUrl)
       }
       reader.readAsDataURL(file)
       setSelectedFile(file)
-
-      // Update theme with the new image
-      updateThemeProperty('backgroundImage', URL.createObjectURL(file))
 
       // Close dialog after upload
       setShowImageUploadDialog(false)
@@ -300,10 +400,26 @@ function DesignEditor(): JSX.Element {
       setIsSaving(true);
       let backgroundImageUrl = theme.backgroundImage;
 
+      // 선택된 이미지 파일이 있다면 S3에 업로드
+      if (selectedFile) {
+        try {
+          const uploadResult = await uploadFileToS3(selectedFile);
+          backgroundImageUrl = uploadResult.url;
+          console.log('S3 업로드 완료:', backgroundImageUrl);
+        } catch (uploadError) {
+          console.error('이미지 업로드 오류:', uploadError);
+          toast({
+            title: '이미지 업로드 실패',
+            description: '이미지를 업로드하는 중 오류가 발생했습니다. 테마는 저장되지만 이미지는 기존 이미지가 유지됩니다.',
+            variant: 'destructive'
+          });
+          // 업로드 실패 시 기존 URL 유지
+        }
+      }
+
       // Create environment object to save
       const environment: Environment = {
-        name: environmentName,
-        theme: {
+        data: {
           colors: theme.colors,
           backgroundImage: backgroundImageUrl,
           titleColor: theme.titleColor
@@ -318,21 +434,8 @@ function DesignEditor(): JSX.Element {
       const jsonStr = JSON.stringify(environment, null, 2);
       setJsonOutput(jsonStr);
 
-      // Save environment to API
-      const response = await fetch('/v1/studio/environments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(environment)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save environment settings');
-      }
-
-      // Get the saved environment data with ID
-      const savedEnvironment = await response.json();
+      // API를 통해 환경 설정 저장
+      const savedEnvironment = await apiService.saveEnvironment(environment);
 
       // Update the current environment
       setCurrentEnvironment(savedEnvironment);
@@ -387,13 +490,15 @@ function DesignEditor(): JSX.Element {
                 <div className="flex-1 bg-gray-900 relative overflow-hidden cursor-pointer group">
                   <div
                     className="absolute inset-0 flex items-center justify-center"
-                    style={{
-                      backgroundImage: `url("${theme.backgroundImage}")`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                      filter: 'brightness(0.7)'
-                    }}
+
                   >
+                    {previewImage && (
+                      <img
+                        src={previewImage}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                      />
+                    )}
                     <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 flex items-center justify-center">
                       <div className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col items-center">
                         <UploadCloud className="w-8 h-8 mb-2" />
@@ -615,27 +720,6 @@ function DesignEditor(): JSX.Element {
               )}
             </Button>
 
-            {previewImage && (
-              <div className="relative">
-                <img
-                  src={previewImage}
-                  alt="Preview"
-                  className="w-full h-40 object-cover rounded-md"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-2 right-2 h-8 w-8 bg-white/80 hover:bg-white"
-                  onClick={() => {
-                    setPreviewImage(null);
-                    setSelectedFile(null);
-                  }}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-
             <div className="text-xs text-gray-500">
               <p>Requirements:</p>
               <ul className="list-disc list-inside">
@@ -657,9 +741,15 @@ function DesignEditor(): JSX.Element {
             <Button
               onClick={() => {
                 if (selectedFile) {
-                  // Update theme with selected file
-                  updateThemeProperty('backgroundImage', URL.createObjectURL(selectedFile));
-                  setShowImageUploadDialog(false);
+                  // FileReader로 데이터 URL 생성
+                  const reader = new FileReader();
+                  reader.onload = (e) => {
+                    const dataUrl = e.target?.result as string;
+                    // 테마 업데이트에 데이터 URL 사용
+                    updateThemeProperty('backgroundImage', dataUrl);
+                    setShowImageUploadDialog(false);
+                  };
+                  reader.readAsDataURL(selectedFile);
                 } else {
                   toast({
                     title: 'No Image Selected',

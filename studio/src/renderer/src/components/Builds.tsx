@@ -30,7 +30,7 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import VersionManager from './VersionManager'
 import { ScrollArea } from '@/components/ui/scroll-area'
-
+import { getS3Config, generateMD5Hash } from '@/lib/utils'
 // Build 인터페이스에 md5_hash 추가
 interface BuildWithHash extends Build {
   md5_hash?: string;
@@ -440,80 +440,7 @@ function Builds(): JSX.Element {
     }))
   }
 
-  // S3 파일 업로드 함수 추가
-  const generateMD5Hash = async (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async function(event) {
-        if (!event.target || !event.target.result) {
-          reject(new Error('Failed to read file'));
-          return;
-        }
 
-        try {
-          const buffer = event.target.result as ArrayBuffer;
-
-          // Web Crypto API 사용
-          const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
-
-          // ArrayBuffer를 16진수 문자열로 변환
-          const hashArray = Array.from(new Uint8Array(hashBuffer));
-          const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-          resolve(hashHex);
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      reader.onerror = function() {
-        reject(new Error('Failed to read file'));
-      };
-
-      reader.readAsArrayBuffer(file);
-    });
-  };
-
-  // S3 설정 가져오기 함수
-  const getS3Config = async () => {
-    try {
-      if (!window.api || typeof window.api.getS3Config !== 'function') {
-        console.error('window.api.getS3Config 함수가 정의되지 않았습니다.');
-
-        // localStorage에서 정보 가져오기 (대체 방법)
-        const settings = JSON.parse(localStorage.getItem('settings') || '{}');
-        return {
-          bucket: settings.bucketName || 'my-default-bucket',
-          accessKeyId: settings.accessKey || '',
-          secretAccessKey: settings.secretKey || '',
-          region: settings.region || 'ap-northeast-2',
-          cdnUrl: settings.cdnUrl || ''
-        };
-      }
-
-      const config = await window.api.getS3Config();
-      if (!config) {
-        throw new Error('S3 설정을 가져오지 못했습니다');
-      }
-
-      return config;
-    } catch (error) {
-      console.error('S3 설정 가져오기 오류:', error);
-      toast({
-        title: 'S3 설정 오류',
-        description: '설정을 가져오는 중 오류가 발생했습니다. 기본값을 사용합니다.'
-      });
-
-      // 오류 발생 시 기본값 반환
-      return {
-        bucket: 'my-default-bucket',
-        accessKeyId: '',
-        secretAccessKey: '',
-        region: 'ap-northeast-2',
-        cdnUrl: ''
-      };
-    }
-  };
   // S3 업로드 함수
   const uploadFileToS3 = async (file: File): Promise<{ url: string, md5: string }> => {
     let tempFilePath: string | null = null;

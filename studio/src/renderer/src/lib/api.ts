@@ -68,6 +68,30 @@ export interface Version {
   files?: VersionFiles;
 }
 
+// 환경 설정 인터페이스 추가
+export interface ThemeColors {
+  primary: string
+  secondary: string
+  accent: string
+  background: string
+  text: string
+  buttonText: string
+  border: string
+}
+
+export interface ThemeConfig {
+  colors: ThemeColors
+  backgroundImage: string
+  titleColor: string
+}
+
+export interface Environment {
+  id?: string;
+  data: ThemeConfig;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 import { showGlobalError } from '../components/ErrorDialog';
 
 /**
@@ -656,6 +680,50 @@ export class ApiService {
       await this.request<void>(`builds/${buildId}/versions/${versionId}/files/${fileId}`, 'DELETE');
     } catch (error) {
       console.error(`Failed to delete file ${fileId} from version ${versionId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch environments from API
+   */
+  async fetchEnvironments(): Promise<Environment[]> {
+    try {
+      const response = await this.request<Environment[] | { data: Environment[] }>('studio/environments');
+
+      if (Array.isArray(response)) {
+        return response;
+      }
+      console.log('response:', response);
+
+      if (response && response.data) {
+        return response.data;
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error fetching environments:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Save environment to API
+   */
+  async saveEnvironment(environment: Environment): Promise<Environment> {
+    try {
+      const response = await this.request<Environment | { data: Environment }>('studio/environments', 'POST', environment);
+
+      if (!response) {
+        throw new Error('Failed to save environment settings');
+      }
+
+      // response가 직접 Environment 객체인지 또는 { data: Environment } 형태인지 확인
+      const savedEnvironment = 'data' in response ? response.data : response;
+
+      return savedEnvironment as Environment;
+    } catch (error) {
+      console.error('Environment save error:', error);
       throw error;
     }
   }

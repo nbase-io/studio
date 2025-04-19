@@ -23,7 +23,7 @@ import AddVersionDialog from './AddVersionDialog';
 import EditVersionDialog from './EditVersionDialog';
 import DeleteVersionDialog from './DeleteVersionDialog';
 import ViewFilesDialog from './ViewFilesDialog';
-
+import { getS3Config, generateMD5Hash } from '@/lib/utils';
 
 interface VersionManagerProps {
   buildId: string;
@@ -626,64 +626,6 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     }
   };
 
-  // S3 설정 가져오기 함수
-  const getS3Config = async () => {
-    try {
-      // 먼저 API 통해 S3 설정 가져오기 시도
-      let s3Config = await window.api.getS3Config();
-
-      // API에서 설정 못 가져왔다면 localStorage 확인
-      if (!s3Config) {
-        const localSettings = localStorage.getItem('settings');
-        if (localSettings) {
-          try {
-            s3Config = JSON.parse(localSettings);
-          } catch (e) {
-            toast({
-              title: 'S3 설정 오류',
-              description: 'S3 설정을 파싱할 수 없습니다.',
-              variant: "destructive"
-            });
-            console.error('Failed to parse S3 settings from localStorage:', e);
-          }
-        }
-      }
-
-      // 설정이 없으면 오류 처리
-      if (!s3Config) {
-      toast({
-          title: 'S3 설정 없음',
-          description: 'S3 설정이 구성되지 않았습니다. 설정에서 S3 정보를 구성해주세요.',
-          variant: "destructive"
-        });
-        throw new Error('S3 settings not configured');
-      }
-
-      // 필수 값 확인
-      if (!s3Config.bucket || !s3Config.accessKeyId || !s3Config.secretAccessKey) {
-        toast({
-          title: 'S3 설정 불완전',
-          description: 'S3 접근을 위한 필수 설정이 누락되었습니다.',
-          variant: "destructive"
-        });
-        throw new Error('Required S3 settings missing');
-      }
-
-      // CDN URL이 없는 경우 기본 S3 URL 사용
-      if (!s3Config.cdnUrl) {
-        s3Config.cdnUrl = `https://${s3Config.bucket}.s3.${s3Config.region || 'ap-northeast-2'}.amazonaws.com`;
-      }
-
-      return s3Config;
-    } catch (err) {
-      toast({
-        title: 'S3 설정 오류',
-        description: err instanceof Error ? err.message : '알 수 없는 S3 설정 오류가 발생했습니다.',
-        variant: "destructive"
-      });
-      throw err;
-    }
-  };
 
   // 파일 업로드 처리 (S3)
   const uploadFileToS3 = async (file: File, versionId: string): Promise<{ url: string; relativePath: string; md5: string; size: number }> => {
@@ -946,33 +888,6 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     } finally {
       setIsSubmitting(false)
     }
-  }
-
-  // MD5 해시 생성 함수
-  const generateMD5Hash = async (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = function(event) {
-        if (!event.target || !event.target.result) {
-          reject(new Error('Failed to read file'))
-          return
-        }
-
-        try {
-          // ArrayBuffer에서 MD5 해시 계산
-
-          // 실제로는 crypto 모듈을 사용하여 MD5 해시 계산
-          // 여기서는 모의 구현
-          resolve('md5-' + Math.random().toString(36).substring(2, 15))
-        } catch (error) {
-          reject(error)
-        }
-      }
-      reader.onerror = function() {
-        reject(new Error('Failed to read file'))
-      }
-      reader.readAsArrayBuffer(file)
-    })
   }
 
   // 드래그 앤 드롭 이벤트 핸들러
