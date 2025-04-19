@@ -94,6 +94,20 @@ function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
 
+  // 설정 변경 이벤트 리스너
+  useEffect(() => {
+    const handleSettingsUpdate = (event: CustomEvent<Settings>) => {
+      console.log('Settings update event received:', event.detail);
+      setSettings(event.detail);
+    };
+
+    window.addEventListener('settings-updated', handleSettingsUpdate as EventListener);
+
+    return () => {
+      window.removeEventListener('settings-updated', handleSettingsUpdate as EventListener);
+    };
+  }, []);
+
   // 설정 로드 함수
   const loadSettings = async () => {
     try {
@@ -101,24 +115,29 @@ function SettingsProvider({ children }: { children: React.ReactNode }) {
       setLoadFailed(false);
 
       if (!window.api || !window.api.loadSettings) {
+        console.error('window.api or loadSettings function is not available');
         setLoadFailed(true);
         setLoading(false);
         return;
       }
 
       const savedSettings = await window.api.loadSettings();
+      console.log('Loaded settings from main process:', savedSettings);
 
       if (savedSettings) {
         setSettings(prev => ({
           ...prev,
           ...savedSettings as Settings
         }));
+        // 설정 로드 후 이벤트 발생
+        window.dispatchEvent(new CustomEvent('settings-updated', { detail: savedSettings }));
       } else {
+        console.log('No saved settings found');
         setLoadFailed(true);
       }
     } catch (error: any) {
+      console.error('Error loading settings:', error);
       setLoadFailed(true);
-      console.error('설정 로드 오류:', error);
     } finally {
       setLoading(false);
     }

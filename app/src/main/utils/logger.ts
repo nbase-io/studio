@@ -172,12 +172,6 @@ export class Logger {
     if (this.options.enableConsole) {
       this.writeToConsole(logMessage);
     }
-
-    // 파일 출력
-    if (this.options.enableFile) {
-      this.writeToFile(logMessage);
-    }
-
     // 원격 서버 전송을 위한 큐에 추가
     if (this.options.enableRemote && this.options.remoteUrl) {
       this.logQueue.push(logMessage);
@@ -224,11 +218,26 @@ export class Logger {
         consoleMethod = console.log;
     }
 
-    // 콘솔 출력
-    if (data) {
-      consoleMethod(`[${formattedTime}] [${level}] [${category}] ${message}`, data);
-    } else {
-      consoleMethod(`[${formattedTime}] [${level}] [${category}] ${message}`);
+    // 로그 메시지 포맷
+    const logPrefix = `[${formattedTime}] [${level}] [${category}]`;
+
+    // 콘솔 출력 - 항상 stdout/stderr에 직접 출력하는 방식으로 변경
+    try {
+      if (data) {
+        consoleMethod(`${logPrefix} ${message}`, data);
+        // 백업: 직접 출력
+        process.stdout.write(`${logPrefix} ${message} ${JSON.stringify(data)}\n`);
+      } else {
+        consoleMethod(`${logPrefix} ${message}`);
+        // 백업: 직접 출력
+        process.stdout.write(`${logPrefix} ${message}\n`);
+      }
+    } catch (error) {
+      // 콘솔 출력 실패 시 stdout으로 강제 출력
+      process.stdout.write(`${logPrefix} [콘솔 출력 실패] ${message}\n`);
+      if (error) {
+        process.stdout.write(`Error: ${error}\n`);
+      }
     }
   }
 

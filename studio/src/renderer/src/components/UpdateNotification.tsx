@@ -22,12 +22,12 @@ export const UpdateNotification: React.FC = () => {
   const [showDialog, setShowDialog] = useState(false);
 
   useEffect(() => {
-    // 업데이트 상태 이벤트 리스너 등록
+    // Register update status event listener
     const handleUpdateStatus = (_: any, status: UpdateStatus) => {
       console.log('Update status received:', status);
       setUpdateStatus(status);
 
-      // 오류가 발생하거나 다운로드 중일 때 대화 상자 표시
+      // Show dialog when error occurs or during download
       if (status.status === 'error' || status.status === 'downloading') {
         setShowDialog(true);
       }
@@ -35,13 +35,13 @@ export const UpdateNotification: React.FC = () => {
 
     window.api.on('update-status', handleUpdateStatus);
 
-    // 컴포넌트 언마운트 시 리스너 제거
+    // Remove listener when component unmounts
     return () => {
       window.api.off('update-status', handleUpdateStatus);
     };
   }, []);
 
-  // 수동으로 업데이트 체크 요청
+  // Request manual update check
   const checkForUpdates = () => {
     window.api.checkForUpdates();
     setUpdateStatus({ status: 'checking' });
@@ -51,7 +51,7 @@ export const UpdateNotification: React.FC = () => {
 
   return (
     <>
-      {/* 다운로드 진행 상태나 오류를 보여주는 대화 상자 */}
+      {/* Dialog showing download progress or error */}
       <AlertDialog open={showDialog} onOpenChange={setShowDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>

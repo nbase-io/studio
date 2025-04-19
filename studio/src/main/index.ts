@@ -295,7 +295,7 @@ function createWindow(): void {
     mainWindow.show();
 
     // Auto open developer tools
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -368,21 +368,31 @@ ipcMain.handle('save-settings', async (_, settings: any) => {
 // Settings load handler
 ipcMain.handle('load-settings', async () => {
   try {
+    console.log('Loading settings from:', settingsFilePath);
+
     if (fs.existsSync(settingsFilePath)) {
       try {
         const encryptedSettings = fs.readFileSync(settingsFilePath, 'utf-8');
+        console.log('Encrypted settings loaded:', encryptedSettings ? '***' : 'empty');
 
         // Check if settings file is empty
         if (!encryptedSettings || encryptedSettings.trim() === '') {
+          console.log('Settings file is empty');
           return null;
         }
 
         // Apply decryption
         const decryptedData = decrypt(encryptedSettings);
+        console.log('Decrypted settings:', decryptedData);
 
         // Check if decrypted data is valid JSON
         try {
-          return JSON.parse(decryptedData);
+          const settings = JSON.parse(decryptedData);
+          console.log('Parsed settings:', {
+            ...settings,
+            apiKey: settings.apiKey ? '***' : 'empty'
+          });
+          return settings;
         } catch (jsonError) {
           console.error('Error parsing settings data:', jsonError);
           // 손상된 설정 파일 백업 및 삭제
@@ -398,14 +408,16 @@ ipcMain.handle('load-settings', async () => {
         const backupPath = `${settingsFilePath}.backup.${Date.now()}`;
         fs.copyFileSync(settingsFilePath, backupPath);
         fs.unlinkSync(settingsFilePath);
-        console.log(`Backup created at ${backupPath} and original settings file removed`);
+        console.log(`Failed settings file backed up to ${backupPath} and removed`);
         return null;
       }
+    } else {
+      console.log('Settings file does not exist');
+      return null;
     }
-    return null;
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error loading settings:', error);
-    return { success: false, error: error.message };
+    return null;
   }
 });
 
@@ -1272,6 +1284,72 @@ ipcMain.handle('get-app-version', () => {
   return {
     version: app.getVersion()
   };
+});
+
+/**
+ * env.local 파일을 읽어 환경 변수를 가져오는 함수
+ */
+function loadEnvFile(filePath: string): Record<string, string> {
+  try {
+    // 파일 경로가 없으면 기본값 사용
+    const envPath = filePath || join(app.getAppPath(), '.env.local');
+    console.log(`Loading env file from: ${envPath}`);
+
+    if (!fs.existsSync(envPath)) {
+      console.log(`Env file not found: ${envPath}`);
+      return {};
+    }
+
+    const content = fs.readFileSync(envPath, 'utf-8');
+    const vars: Record<string, string> = {};
+
+    // 각 라인을 처리
+    content.split('\n').forEach(line => {
+      // 주석과 빈 줄 무시
+      const trimmedLine = line.trim();
+      if (!trimmedLine || trimmedLine.startsWith('#')) return;
+
+      // KEY=VALUE 형식의 라인 처리
+      const match = trimmedLine.match(/^([^=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim().replace(/^["']|["']$/g, ''); // 따옴표 제거
+        vars[key] = value;
+      }
+    });
+
+    console.log(`Loaded ${Object.keys(vars).length} environment variables from ${envPath}`);
+    return vars;
+  } catch (error) {
+    console.error('Error loading env file:', error);
+    return {};
+  }
+}
+
+// .env.local 파일에서 환경 변수 로드 핸들러
+ipcMain.handle('load-env-local', async () => {
+  try {
+    // 두 가지 경로에서 env 파일 로드 시도
+    const appEnvPath = join(app.getAppPath(), 'env.local');
+    const workDirEnvPath = join(process.cwd(), 'env.local');
+
+    console.log('appEnvPath', appEnvPath);
+    console.log('workDirEnvPath', workDirEnvPath);
+    // 앱 디렉토리에서 로드 시도
+    let envVars = loadEnvFile(appEnvPath);
+
+    // 작업 디렉토리에서도 로드 시도 (병합)
+    if (fs.existsSync(workDirEnvPath)) {
+      const workDirVars = loadEnvFile(workDirEnvPath);
+      envVars = { ...envVars, ...workDirVars };
+    }
+
+    console.log(`Total env variables loaded: ${Object.keys(envVars).length}`);
+    return envVars;
+  } catch (error) {
+    console.error('Error loading .env.local file:', error);
+    return {};
+  }
 });
 
 // App startup - Clear temporary files

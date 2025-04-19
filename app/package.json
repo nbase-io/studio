@@ -17,8 +17,13 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
+    "build:win-installer": "npm run build && electron-builder --win --x64 --ia32",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:mac-signed": "electron-vite build && electron-builder --mac --sign",
+    "build:mac-installer": "cross-env NODE_ENV=production electron-vite build && electron-builder --mac --universal",
+    "build:mac-installer-signed": "cross-env NODE_ENV=production APPLE_ID=$APPLE_ID APPLE_APP_SPECIFIC_PASSWORD=$APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID=$APPLE_TEAM_ID electron-vite build && electron-builder --mac --universal --sign",
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:linux-installer": "npm run build && electron-builder --linux --x64"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -27,10 +32,12 @@
     "@radix-ui/react-progress": "^1.1.3",
     "@radix-ui/react-slot": "^1.1.0",
     "adm-zip": "^0.5.16",
+    "axios": "^1.6.7",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "electron-dl": "^4.0.0",
     "electron-updater": "^6.1.7",
+    "ini": "^4.1.1",
     "lucide-react": "^0.456.0",
     "react-hot-toast": "^2.5.2",
     "tailwind-merge": "^2.5.4",
@@ -40,11 +47,14 @@
     "@electron-toolkit/eslint-config-prettier": "^2.0.0",
     "@electron-toolkit/eslint-config-ts": "^2.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@electron/notarize": "^2.2.0",
     "@types/node": "^20.17.6",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/yauzl": "^2.10.3",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
     "electron": "^31.0.2",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
@@ -56,11 +66,12 @@
     "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.5.2",
-    "vite": "^5.3.1"
+    "vite": "^5.3.1",
+    "yauzl": "^3.2.0"
   },
   "build": {
-    "appId": "com.shadcn.electron.app",
-    "productName": "Shadcn Electron App",
+    "appId": "com.gamepot.studio.app",
+    "productName": "GamePot Studio",
     "copyright": "Copyright © 2024 ${author}",
     "directories": {
       "output": "dist"
@@ -69,17 +80,63 @@
       "out/**/*",
       "resources/**/*"
     ],
+    "publish": {
+      "provider": "generic",
+      "url": "https://update.gamepot.io/app"
+    },
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
       ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "category": "public.app-category.utilities",
-      "icon": "resources/icon.icns"
+      "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "signIgnore": [
+        "node_modules"
+      ]
     },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "afterSign": "scripts/notarize.js",
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "ia32"]
+        }
       ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "icon": "resources/icon.ico"
     },
     "nsis": {
@@ -87,15 +144,34 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Shadcn App"
+      "shortcutName": "GamePot Studio",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "uninstallDisplayName": "${productName}",
+      "differentialPackage": true,
+      "installerIcon": "resources/icon.ico",
+      "installerHeaderIcon": "resources/icon.ico"
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        },
+        {
+          "target": "rpm",
+          "arch": ["x64"]
+        }
       ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "category": "Utility",
-      "icon": "resources/icon.png"
+      "icon": "resources/icon.png",
+      "maintainer": "GamePot",
+      "vendor": "GamePot",
+      "synopsis": "GamePot Studio"
     }
   }
 }

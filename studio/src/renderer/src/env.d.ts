@@ -44,5 +44,6 @@ interface Window {
     on: (channel: string, func: (...args: any[]) => void) => void;
     off: (channel: string, func: (...args: any[]) => void) => void;
     checkForUpdates: () => Promise<void>;
+    loadEnvLocal: () => Promise<Record<string, string>>;
   };
 }

@@ -26,14 +26,14 @@ export function GameLauncher({
   isButtonDisabled = false
 }: GameLauncherProps): JSX.Element {
   return (
-    <Card className="w-[800px] h-[600px] border rounded-md shadow-md mx-auto overflow-hidden">
+    <Card className="w-[800px] h-[500px] border rounded-md shadow-md mx-auto overflow-hidden">
       <CardContent className="p-0 h-full">
         <div
-          className="w-full h-[480px] bg-cover bg-center border-b"
+          className="w-full h-[420px] bg-cover bg-center border-b"
           style={{ backgroundImage: `url(${image})` }}
         />
-        <div className="p-4 bg-white flex items-center justify-between h-[120px]">
-          <div className="flex-1 mr-4 space-y-2">
+        <div className="p-3 bg-white flex items-center justify-between h-[80px]">
+          <div className="flex-1 mr-4 space-y-1.5">
             <div className="flex justify-between text-sm">
               <span>{downloadSize}</span>
               <span>Time remaining: {remainingTime}</span>
@@ -51,7 +51,7 @@ export function GameLauncher({
           <Button
             variant={isDownloading ? "destructive" : "default"}
             onClick={onEvent}
-            className="h-16 px-8 text-lg font-semibold"
+            className="h-12 px-6 text-base font-semibold"
             disabled={isButtonDisabled}
           >
             {buttonLabel}

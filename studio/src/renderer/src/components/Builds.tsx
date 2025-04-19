@@ -31,12 +31,14 @@ import { useToast } from '@/components/ui/use-toast'
 import VersionManager from './VersionManager'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getS3Config, generateMD5Hash } from '@/lib/utils'
+import { useSettings } from '../main' // Get settings context hook
 // Build 인터페이스에 md5_hash 추가
 interface BuildWithHash extends Build {
   md5_hash?: string;
 }
 
 function Builds(): JSX.Element {
+
   const { toast } = useToast()
 
   // Dialog state
@@ -93,14 +95,6 @@ function Builds(): JSX.Element {
   const editFileInputRef = useRef<HTMLInputElement>(null)
   const [editSetupFile, setEditSetupFile] = useState<File | null>(null)
 
-  // Debugging state
-  const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false)
-  const [debugLogs, setDebugLogs] = useState<Array<{
-    timestamp: Date,
-    message: string,
-    type: 'info' | 'success' | 'error' | 'warning'
-  }>>([])
-
   // Add Build Dialog state
   const [showAddBuildDialog, setShowAddBuildDialog] = useState(false)
 
@@ -126,6 +120,7 @@ function Builds(): JSX.Element {
     setErrorLogs(prev => [...prev, `${new Date().toLocaleString()}: ${message}`]);
     setErrorDialogOpen(true);
   };
+
   // Validate all form fields when values change
   useEffect(() => {
     if (!showAddBuildDialog) return;
@@ -236,11 +231,11 @@ function Builds(): JSX.Element {
       <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>파일 업로드 중</DialogTitle>
+            <DialogTitle>File Upload in Progress</DialogTitle>
             <DialogDescription>
               {Object.keys(uploadProgress).length > 0
-                ? "파일을 서버에 업로드하는 중입니다. 잠시만 기다려주세요."
-                : "업로드가 완료되었습니다!"}
+                ? "Uploading file to server. Please wait..."
+                : "Upload completed!"}
             </DialogDescription>
           </DialogHeader>
           <div className="py-6">
@@ -254,14 +249,14 @@ function Builds(): JSX.Element {
             </div>
             <p className="text-center mt-3 text-sm font-medium text-gray-700 dark:text-gray-300">
               {Object.keys(uploadProgress).length > 0
-                ? `${Object.values(uploadProgress).reduce((a, b) => a + b).toFixed(0)}% 완료`
-                : "처리 중..."}
+                ? `${Object.values(uploadProgress).reduce((a, b) => a + b).toFixed(0)}% complete`
+                : "Processing..."}
             </p>
             {setupFile && (
               <div className="mt-4 text-sm space-y-1 p-3 bg-gray-50 rounded-md dark:bg-gray-800">
                 <p className="font-medium">{setupFile.name}</p>
-                <p className="text-gray-500 dark:text-gray-400">크기: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                {fileHash && <p className="text-gray-500 dark:text-gray-400 truncate">해시: {fileHash}</p>}
+                <p className="text-gray-500 dark:text-gray-400">Size: {(setupFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                {fileHash && <p className="text-gray-500 dark:text-gray-400 truncate">Hash: {fileHash}</p>}
               </div>
             )}
           </div>
@@ -271,7 +266,7 @@ function Builds(): JSX.Element {
                 onClick={() => setIsUploadDialogOpen(false)}
                 className="w-full sm:w-auto"
               >
-                확인
+                OK
               </Button>
             )}
             {Object.keys(uploadProgress).length > 0 && (
@@ -280,7 +275,7 @@ function Builds(): JSX.Element {
                 onClick={() => setIsUploadDialogOpen(false)}
                 className="w-full sm:w-auto"
               >
-                배경에서 계속하기
+                Continue from background
               </Button>
             )}
           </DialogFooter>
@@ -1237,17 +1232,31 @@ function Builds(): JSX.Element {
           <ScrollArea className="flex-1 overflow-auto h-[calc(100vh-12rem)]">
             <Card className="w-full">
               <CardContent className="p-0">
-                <BuildsList
-                  key={buildListKey}
-                  items={builds}
-                  loading={loading}
-                  error={error}
-                  onBuildSelect={handleBuildSelect}
-                  onSelect={handleBuildSelect}
-                  onEdit={handleBuildEdit}
-                  onDelete={handleBuildDelete}
-                  serverStatus={serverStatus}
-                />
+                {builds.length === 0 && !loading ? (
+                  <div className="flex flex-col items-center justify-center p-8 text-center">
+                    <p className="text-gray-500 mb-4 text-xs">No builds found</p>
+                    <Button
+                      onClick={() => setShowAddBuildDialog(true)}
+                      size="sm"
+                      className="h-7 text-xs"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add New Build
+                    </Button>
+                  </div>
+                ) : (
+                  <BuildsList
+                    key={buildListKey}
+                    items={builds}
+                    loading={loading}
+                    error={error}
+                    onBuildSelect={handleBuildSelect}
+                    onSelect={handleBuildSelect}
+                    onEdit={handleBuildEdit}
+                    onDelete={handleBuildDelete}
+                    serverStatus={serverStatus}
+                  />
+                )}
               </CardContent>
             </Card>
           </ScrollArea>
@@ -1754,29 +1763,22 @@ function Builds(): JSX.Element {
 
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="h-7 text-xs py-0">
-              Cancel
-            </Button>
-                <div className="flex flex-col items-end">
-                  {Object.values(editFormErrors).some(Boolean) && (
-                    <div className="text-red-500 text-xs mb-1">
-                      Please fix the errors before submitting
-                    </div>
-                  )}
-                  <Button
-                    onClick={handleUpdateBuild}
-                    disabled={
-                      !editingBuild ||
-                      !editingBuild.name ||
-                      !editingBuild.version ||
-                      isEditSubmitting ||
-                      !serverStatus.connected ||
-                      Object.values(editFormErrors).some(Boolean)
-                    }
-                    className="h-7 text-xs py-0"
-                  >
-                    {isEditSubmitting ? 'Updating...' : 'Update Build'}
-                  </Button>
-                </div>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleUpdateBuild}
+                  disabled={
+                    !editingBuild ||
+                    !editingBuild.name ||
+                    !editingBuild.version ||
+                    isEditSubmitting ||
+                    !serverStatus.connected ||
+                    Object.values(editFormErrors).some(Boolean)
+                  }
+                  className="h-7 text-xs py-0"
+                >
+                  {isEditSubmitting ? 'Updating...' : 'Update Build'}
+                </Button>
               </div>
             </div>
           </DialogFooter>

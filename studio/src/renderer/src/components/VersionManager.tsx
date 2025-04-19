@@ -580,15 +580,7 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
           // JSON 파싱 실패 시 원본 에러 메시지 사용
         }
 
-        // S3에서 업로드된 파일 삭제 시도
-        for (const fileData of uploadedFileData) {
-          try {
-            // S3 파일 삭제 API 호출
-            await deleteFileFromS3(fileData.url);
-          } catch (deleteErr) {
-            console.error(`Failed to delete S3 file: ${fileData.url}`, deleteErr);
-          }
-        }
+
 
         toast({
           title: 'Failed to Update Version',
@@ -758,9 +750,9 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
       }));
 
       console.log(`S3 업로드 완료: ${file.name} -> ${key}`);
-
+      const settings = JSON.parse(localStorage.getItem('settings') || '{}');
       // 파일 정보 준비
-      const fileUrl = `${cdnUrl}/${key}`;
+      const fileUrl = `${settings.cdnUrl}/${key}`;
       // MD5 해시 계산
       console.log(`MD5 해시 계산 중: ${file.name}`);
       const md5Hash = await generateMD5Hash(file);
@@ -1202,16 +1194,6 @@ export default function VersionManager({ buildId, onBack }: VersionManagerProps)
     } finally {
       setIsUploading(false)
     }
-  }
-
-  // 로딩 중일 때 표시
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-4" />
-        <p className="text-xs text-gray-600">Loading version information...</p>
-      </div>
-    )
   }
 
   // 오류 발생 시 표시

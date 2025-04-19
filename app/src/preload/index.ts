@@ -53,6 +53,53 @@ interface DownloadEvent {
   error?: string
 }
 
+// 프로젝트 정보 타입 정의
+interface ProjectInfo {
+  projectId: string
+  version: string
+  theme: {
+    backgroundColor: string
+    fontColor: string
+    logoUrl: string
+  }
+}
+
+// studio.ini에서 가져온 설정 값 타입 정의
+interface StudioIniValues {
+  PROJECT_ID: string
+  BETA: number
+  isBeta: boolean
+}
+
+interface MainProcessLog {
+  type: 'log' | 'error' | 'warn' | 'info'
+  message: string
+}
+
+// 환경 설정 인터페이스 정의
+interface ThemeColors {
+  primary: string
+  secondary: string
+  accent: string
+  background: string
+  text: string
+  buttonText: string
+  border: string
+}
+
+interface ThemeConfig {
+  colors: ThemeColors
+  backgroundImage: string
+  titleColor: string
+}
+
+interface Environment {
+  id?: string
+  data: ThemeConfig
+  createdAt?: string
+  updatedAt?: string
+}
+
 // Download initialization (to prevent duplicate downloads)
 const api = {
   initializeDownload: (fileUrl: string, shouldCleanup: boolean): Promise<InitializeDownloadResult> => {
@@ -97,6 +144,30 @@ const api = {
     ipcRenderer.on('extract-progress', listener)
     return (): void => {
       ipcRenderer.removeListener('extract-progress', listener)
+    }
+  },
+
+  // 프로젝트 정보 API 추가
+  getProjectInfo: (): Promise<ProjectInfo> => {
+    return ipcRenderer.invoke('get-project-info')
+  },
+
+  // studio.ini 값 가져오기 API 추가
+  getStudioIniValues: (): Promise<StudioIniValues> => {
+    return ipcRenderer.invoke('get-studio-ini-values')
+  },
+
+  // 환경 설정 가져오기 API 추가
+  getEnvironments: (): Promise<Environment[]> => {
+    return ipcRenderer.invoke('get-environments')
+  },
+
+  // 메인 프로세스 로그 수신 API
+  onMainProcessLog: (callback: (log: MainProcessLog) => void): () => void => {
+    const listener = (_event: IpcRendererEvent, log: MainProcessLog): void => callback(log)
+    ipcRenderer.on('main-process-log', listener)
+    return (): void => {
+      ipcRenderer.removeListener('main-process-log', listener)
     }
   }
 }

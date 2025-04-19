@@ -7,6 +7,9 @@ import fs from 'fs'
 import path from 'path'
 import admZip from 'adm-zip'
 import { Logger, LogLevel } from './utils/logger'
+import { getProjectInfo, ProjectInfo } from './utils/apiClient'
+import { readConfig, getConfigValue } from './utils/configReader'
+import { ApiService } from './utils/api'
 
 // ===========================================
 // 전역 상태 관리
@@ -64,6 +67,9 @@ function resetDownloadState(): void {
   downloadState.size.total = 0;
   downloadState.size.transferred = 0;
 }
+
+// 프로젝트 정보 전역 상태 관리
+let projectInfoCache: ProjectInfo | null = null
 
 // 다운로드 관련 IPC 핸들러 추가
 function setupDownloadHandlers(mainWindow: BrowserWindow): void {
@@ -607,24 +613,180 @@ function setupDownloadHandlers(mainWindow: BrowserWindow): void {
   });
 }
 
+// IPC 핸들러 설정 함수 추가
+function setupProjectInfoHandlers(): void {
+  // 프로젝트 정보 요청 처리
+  ipcMain.handle('get-project-info', async () => {
+    try {
+      // 캐시된 정보가 있으면 사용, 없으면 API 호출
+      if (!projectInfoCache) {
+        logger.info('API', '프로젝트 정보 요청 시작')
+
+        // studio.ini에서 PROJECT_ID와 BETA 값 읽기
+        try {
+          const projectId = getConfigValue('PROJECT_ID')
+          const isBeta = getConfigValue('BETA') === 1
+
+          logger.info('Config', 'studio.ini 파일에서 프로젝트 정보 로드', {
+            projectId,
+            isBeta
+          })
+
+          // API 호출 시 .ini 설정값 사용
+          projectInfoCache = await getProjectInfo(projectId, isBeta)
+        } catch (configError) {
+          logger.error('Config', 'studio.ini 파일 로드 실패, 기본값으로 계속', { error: configError })
+          // 설정 파일 로드 실패 시 기본 API 호출 사용
+          projectInfoCache = await getProjectInfo()
+        }
+
+        logger.info('API', '프로젝트 정보 요청 완료', { projectId: projectInfoCache.projectId })
+      }
+      return projectInfoCache
+    } catch (error) {
+      logger.error('API', '프로젝트 정보 요청 실패', error)
+      throw error
+    }
+  })
+
+  // studio.ini 설정값 요청 처리
+  ipcMain.handle('get-config', async (_event, key) => {
+    try {
+      if (!key) {
+        return readConfig()
+      }
+      return getConfigValue(key)
+    } catch (error) {
+      logger.error('Config', `설정값 요청 실패: ${key}`, error)
+      throw error
+    }
+  })
+}
+
+// 이벤트 처리 핸들러 모음
+function setupIpcHandlers(mainWindow: BrowserWindow): void {
+  // 다운로드 핸들러 설정
+  setupDownloadHandlers(mainWindow)
+
+  // 프로젝트 정보 핸들러 설정
+  setupProjectInfoHandlers()
+
+  // studio.ini에서 PROJECT_ID와 BETA 값을 직접 가져오는 핸들러
+  ipcMain.handle('get-studio-ini-values', async () => {
+    try {
+      logger.info('Config', 'studio.ini 파일에서 값을 가져오는 요청')
+
+      // 설정 읽기
+      const config = readConfig()
+
+      return {
+        PROJECT_ID: config.PROJECT_ID,
+        BETA: config.BETA,
+        isBeta: config.BETA === 1
+      }
+    } catch (error) {
+      logger.error('Config', 'studio.ini 파일에서 값을 가져오는 중 오류 발생', { error })
+      throw error
+    }
+  })
+
+  // 환경설정 가져오기 핸들러
+  ipcMain.handle('get-environments', async () => {
+    try {
+      logger.info('API', '환경설정 가져오기 요청')
+
+      // API 서비스 인스턴스 생성 (studio.ini의 PROJECT_ID가 자동으로 설정됨)
+      const apiService = new ApiService()
+
+      // 환경설정 가져오기
+      const environments = await apiService.getEnvironments();
+
+      return environments;
+    } catch (error) {
+      logger.error('API', '환경설정 가져오기 실패', { error })
+      throw error
+    }
+  })
+
+  // 메인 프로세스 로그를 렌더러에 전달
+  const originalConsoleLog = console.log;
+  const originalConsoleError = console.error;
+  const originalConsoleWarn = console.warn;
+  const originalConsoleInfo = console.info;
+
+  // 콘솔 로그 오버라이드 - 렌더러에 전달
+  console.log = function(...args: any[]) {
+    originalConsoleLog.apply(console, args);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('main-process-log', {
+        type: 'log',
+        message: args.map(arg => String(arg)).join(' ')
+      });
+    }
+  };
+
+  console.error = function(...args: any[]) {
+    originalConsoleError.apply(console, args);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('main-process-log', {
+        type: 'error',
+        message: args.map(arg => String(arg)).join(' ')
+      });
+    }
+  };
+
+  console.warn = function(...args: any[]) {
+    originalConsoleWarn.apply(console, args);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('main-process-log', {
+        type: 'warn',
+        message: args.map(arg => String(arg)).join(' ')
+      });
+    }
+  };
+
+  console.info = function(...args: any[]) {
+    originalConsoleInfo.apply(console, args);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('main-process-log', {
+        type: 'info',
+        message: args.map(arg => String(arg)).join(' ')
+      });
+    }
+  };
+}
+
 function createWindow(): BrowserWindow {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 800,
-    height: 600,
+    height: 530,
     resizable: false,
+    backgroundColor: '#121212',
     show: false,
+    title: 'GamePot Studio',
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      nodeIntegration: true,
+      contextIsolation: true,
+      webviewTag: true
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
+  // 메인 창 로드
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  // 메인 창이 준비되면 바로 표시
+  mainWindow.once('ready-to-show', () => {
     mainWindow.show()
-    logger.logAppEvent('창 표시됨', { id: mainWindow.id })
+    mainWindow.webContents.openDevTools() // 개발자 도구 자동 실행
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -636,18 +798,8 @@ function createWindow(): BrowserWindow {
   // 업데이트 핸들러 설정
   setupUpdaterHandlers(mainWindow)
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-    logger.info('System', '개발 모드로 앱 시작', { url: process.env['ELECTRON_RENDERER_URL'] })
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-    logger.info('System', '프로덕션 모드로 앱 시작')
-  }
-
-  // 다운로드 핸들러 설정
-  setupDownloadHandlers(mainWindow)
+  // 모든 IPC 핸들러 설정
+  setupIpcHandlers(mainWindow)
 
   return mainWindow
 }

@@ -43,6 +43,7 @@ declare global {
       onExtractProgress: (callback: (progress: ExtractProgress) => void) => () => void
       sendDownloadEvent: (event: DownloadEvent) => Promise<void>
       onSecondInstanceDetected: (callback: () => void) => () => void
+      getEnvironments: () => Promise<Environment[]>
     }
   }
 }
@@ -73,6 +74,19 @@ interface DownloadEvent {
   elapsedTime?: number
   targetFolder?: string
   error?: string
+}
+
+interface Environment {
+  data: {
+    colors: {
+      primary: string;
+      secondary: string;
+      accent: string;
+      background: string;
+      text: string;
+    };
+    backgroundImage?: string;
+  };
 }
 
 // Download status type
@@ -762,6 +776,58 @@ function App(): JSX.Element {
 
     return 'Download';
   }
+
+  // 앱 초기화 시 환경설정 가져오기
+  useEffect(() => {
+    const loadEnvironments = async (): Promise<void> => {
+      try {
+        console.log('환경설정 로딩 시작...');
+        const environments = await window.api.getEnvironments();
+        console.log('환경설정 로딩 완료:', environments);
+
+        // 환경설정이 있으면 첫 번째 환경설정 적용
+        if (environments && environments.length > 0) {
+          // 여기서 환경설정을 상태로 저장하거나 적용하는 로직을 구현할 수 있습니다.
+          const firstEnvironment = environments[0];
+          console.log('첫 번째 환경설정 적용:', firstEnvironment);
+
+          // 예: 테마 적용 로직
+          if (firstEnvironment.data && firstEnvironment.data.colors) {
+            const { colors } = firstEnvironment.data;
+            // CSS 변수로 테마 색상 적용 예시
+            document.documentElement.style.setProperty('--color-primary', colors.primary);
+            document.documentElement.style.setProperty('--color-secondary', colors.secondary);
+            document.documentElement.style.setProperty('--color-accent', colors.accent);
+            document.documentElement.style.setProperty('--color-background', colors.background);
+            document.documentElement.style.setProperty('--color-text', colors.text);
+
+          }
+
+          document.documentElement.style.setProperty('--title-color', firstEnvironment.data.titleColor);
+          // 배경 이미지 적용
+          if (firstEnvironment.data && firstEnvironment.data.backgroundImage) {
+            const bgImage = firstEnvironment.cdnUrl + firstEnvironment.data.backgroundImage;
+            // 배경 이미지 URL이 있는 경우 적용
+            if (bgImage) {
+              // CSS 변수로 배경 이미지 설정
+              document.documentElement.style.setProperty('--background-image', `url(${bgImage})`);
+              // 또는 body에 직접 배경 이미지 적용
+              document.body.style.backgroundImage = `url(${bgImage})`;
+              document.body.style.backgroundSize = 'cover';
+              document.body.style.backgroundPosition = 'center center';
+              document.body.style.backgroundRepeat = 'no-repeat';
+
+              console.log('배경 이미지가 적용되었습니다:', bgImage);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('환경설정 로딩 실패:', error);
+      }
+    };
+
+    loadEnvironments();
+  }, []);
 
   return (
     <div className="h-screen w-full flex items-center justify-center overflow-hidden">

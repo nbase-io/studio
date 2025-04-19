@@ -88,6 +88,7 @@ export interface ThemeConfig {
 export interface Environment {
   id?: string;
   data: ThemeConfig;
+  cdnUrl: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -102,17 +103,67 @@ export class ApiService {
   private projectId: string;
   private apiKey: string;
   private cdnUrl: string;
-  private betaEnv: boolean;
+
   constructor() {
-    // Default values, will be updated when loadSettings is called
     this.baseUrl = 'https://plugin.gamepot.ntruss.com';
     this.projectId = '';
     this.apiKey = '';
     this.cdnUrl = '';
-    this.betaEnv = false;
 
-    // Load settings when initialized
+    // env.local 파일에서 서버 URL 가져오기
+    this.loadServerUrlFromEnv();
+
+    // Initialize and load saved settings
     this.loadSettings();
+
+
+    // Listen for settings updates
+    window.addEventListener('settings-updated', ((event: CustomEvent) => {
+      const newSettings = event.detail;
+      console.log('Settings updated event received:', newSettings);
+
+      this.projectId = newSettings.projectId || '';
+      this.apiKey = newSettings.apiKey || '';
+      this.cdnUrl = newSettings.cdnUrl || '';
+
+      console.log('Updated API settings:', {
+        projectId: this.projectId,
+        apiKey: this.apiKey ? '***' : 'empty',
+        cdnUrl: this.cdnUrl
+      });
+    }) as EventListener);
+  }
+
+  /**
+   * env.local 파일에서 서버 URL 가져오기
+   */
+  async loadServerUrlFromEnv(): Promise<void> {
+    // window.api.loadEnvLocal이 존재하는지 확인
+    if (window.api?.loadEnvLocal) {
+      try {
+        const envVars = await window.api.loadEnvLocal();
+        console.log('환경 변수 로드 결과:', envVars);
+
+        // Server URL이 지정되어 있으면 설정
+        if (envVars.Server) {
+          this.baseUrl = envVars.Server;
+
+          // URL 형식 확인 및 수정
+          if (!this.baseUrl.startsWith('http')) {
+            this.baseUrl = `http://${this.baseUrl}`;
+          }
+
+          // 마지막 슬래시 제거
+          if (this.baseUrl.endsWith('/')) {
+            this.baseUrl = this.baseUrl.slice(0, -1);
+          }
+
+          console.log('서버 URL을 env.local 값으로 설정:', this.baseUrl);
+        }
+      } catch (error) {
+        console.error('env.local 로딩 실패:', error);
+      }
+    }
   }
 
   /**
@@ -120,30 +171,31 @@ export class ApiService {
    */
   loadSettings(): void {
     const settingsStr = localStorage.getItem('settings');
+    console.log('Loading settings from localStorage:', settingsStr);
+
     if (settingsStr) {
       try {
         const settings = JSON.parse(settingsStr);
-        if(settings.isBetaEnv) {
-          this.baseUrl = 'https://dev-plugin.gamepot.io'
-        } else {
-          this.baseUrl = 'https://plugin.gamepot.ntruss.com';
-        }
+        console.log('Parsed settings:', settings);
+
         this.projectId = settings.projectId || '';
         this.apiKey = settings.apiKey || '';
         this.cdnUrl = settings.cdnUrl || '';
-        this.betaEnv = settings.isBetaEnv || false;
-        console.log('API settings loaded:', {
-          serverUrl: this.baseUrl,
-          cdnUrl: this.cdnUrl
+
+        console.log('Current API settings:', {
+          projectId: this.projectId,
+          apiKey: this.apiKey ? '***' : 'empty',
+          cdnUrl: this.cdnUrl,
+          serverUrl: 'https://plugin.gamepot.ntruss.com/v1'
         });
+
+        // 설정 로드 후 이벤트 발생
+        window.dispatchEvent(new CustomEvent('settings-updated', { detail: settings }));
       } catch (error) {
         console.error('Failed to load API settings:', error);
       }
-    }
-
-    // Set default values if no settings
-    if (!this.baseUrl) {
-      this.baseUrl = 'https://plugin.gamepot.ntruss.com';
+    } else {
+      console.log('No settings found in localStorage');
     }
 
     // Check URL format and modify
@@ -209,7 +261,7 @@ export class ApiService {
    * Construct full URL to the API endpoint
    */
   private getUrl(endpoint: string): string {
-    return `${this.baseUrl}/${endpoint}`;
+    return `${this.baseUrl}/v1/${endpoint.replace(/^\//, '')}`;
   }
 
   /**
@@ -223,7 +275,7 @@ export class ApiService {
   ): Promise<T> {
     this.loadSettings(); // Reload settings to ensure we have the latest
 
-    const url = this.getUrl(endpoint,);
+    const url = this.getUrl(endpoint);
     console.log(url)
     console.log(`API request: ${method} ${url}`);
 
@@ -524,23 +576,7 @@ export class ApiService {
         return { totalCount: 0, versions: [] };
       }
 
-      // Apply CDN URL to download URLs
-      if (this.cdnUrl) {
-        response.data.forEach(version => {
-          if (version.download_url && !version.download_url.startsWith('http')) {
-            version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
-          }
 
-          // Also apply to files if they exist
-          if (version.files && Array.isArray(version.files.files)) {
-            version.files.files.forEach(file => {
-              if (file.download_url && !file.download_url.startsWith('http')) {
-                file.download_url = `${this.cdnUrl}/${file.download_url.replace(/^\//, '')}`;
-              }
-            });
-          }
-        });
-      }
 
       console.log(`Successfully fetched ${response.data.length} versions for build ${buildId}`);
       return { totalCount: response.totalCount, versions: response.data };
@@ -565,21 +601,6 @@ export class ApiService {
 
       const version = response.data;
 
-      // Apply CDN URL to download URLs
-      if (this.cdnUrl) {
-        if (version.download_url && !version.download_url.startsWith('http')) {
-          version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
-        }
-
-        // Also apply to files if they exist
-        if (version.files && Array.isArray(version.files)) {
-          version.files.forEach(file => {
-            if (file.download_url && !file.download_url.startsWith('http')) {
-              file.download_url = `${this.cdnUrl}/${file.download_url.replace(/^\//, '')}`;
-            }
-          });
-        }
-      }
 
       return version;
     } catch (error) {
@@ -628,11 +649,6 @@ export class ApiService {
 
       const version = response.data;
 
-      // Apply CDN URL to download URLs
-      if (this.cdnUrl && version.download_url && !version.download_url.startsWith('http')) {
-        version.download_url = `${this.cdnUrl}/${version.download_url.replace(/^\//, '')}`;
-      }
-
       return version;
     } catch (error) {
       console.error(`Failed to update version ${versionId} for build ${buildId}:`, error);
@@ -666,10 +682,6 @@ export class ApiService {
       }
 
       const file = response.data;
-      // Apply CDN URL to download URL
-      if (this.cdnUrl && file?.download_url && !file?.download_url.startsWith('http')) {
-        file.download_url = `${this.cdnUrl}/${file.download_url.replace(/^\//, '')}`;
-      }
 
       return file;
     } catch (error) {
@@ -694,7 +706,7 @@ export class ApiService {
   /**
    * Fetch environments from API
    */
-  async fetchEnvironments(): Promise<Environment[]> {
+  async getEnvironments(): Promise<Environment[]> {
     try {
       const response = await this.request<Environment[] | { data: Environment[] }>('studio/environments');
 

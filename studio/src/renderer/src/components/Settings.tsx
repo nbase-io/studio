@@ -14,13 +14,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select'
 import { useSettings } from '../main' // 설정 컨텍스트 훅 가져오기
 
 // 글로벌 Settings 타입과 호환성을 위한 타입 정의
@@ -34,8 +27,6 @@ type Settings = {
   serverUrl: string;
   endpointUrl: string;
   cdnUrl: string;
-  isBetaEnv?: boolean;
-  gamepotRegion?: string;
   [key: string]: any;
 }
 
@@ -43,7 +34,6 @@ type Settings = {
 interface AppSettings {
   projectId: string;
   apiKey: string;
-  isBetaEnv?: boolean;
   // S3 설정 필드
   accessKey: string;
   secretKey: string;
@@ -52,18 +42,8 @@ interface AppSettings {
   serverUrl: string; // serverUrl 필드 추가 (Settings 타입 호환을 위해)
   endpointUrl: string;
   cdnUrl: string;
-  gamepotRegion?: string; // 게임팟 리전 필드 추가
   [key: string]: any; // 다른 필드도 허용
 }
-
-// 리전 정보 정의
-const regionOptions = [
-  { value: 'kr', label: 'Korea (Seoul)' },
-  { value: 'jp', label: 'Japan (Tokyo)' },
-  { value: 'sg', label: 'Singapore' },
-  { value: 'us', label: 'USA (N. Virginia)' },
-  { value: 'eu', label: 'Germany (Frankfurt)' }
-];
 
 // CSS로 스위치 컴포넌트 구현 (Radix UI를 사용하지 않는 간단한 버전)
 const ToggleSwitch = ({
@@ -109,24 +89,20 @@ function Settings(): JSX.Element {
   // 로그인 화면 상태
   const [showLoginDialog, setShowLoginDialog] = useState(false);
 
-  // 베타 환경 선택 상태 (기본값: false = 리얼 환경)
-  const [isBetaEnv, setIsBetaEnv] = useState(false);
-
   // S3 설정 표시 여부
   const [showS3Settings, setShowS3Settings] = useState(false);
 
   // 로컬 상태 - 수정 중인 설정을 위한 상태 (기본값 설정)
-  const [settings, setSettings] = useState<AppSettings>({
+  const [settings, setSettings] = useState<Settings>({
     projectId: '',
     apiKey: '',
     accessKey: '',
     secretKey: '',
-    region: 'ap-northeast-2', // 기본 한국 리전
+    region: 'ap-northeast-2',
     s3Bucket: '',
     serverUrl: '',
     endpointUrl: '',
-    cdnUrl: '',
-    gamepotRegion: 'ap-northeast-2' // 기본 한국 리전
+    cdnUrl: ''
   });
 
   const [loading, setLoading] = useState(false)
@@ -140,9 +116,6 @@ function Settings(): JSX.Element {
   // 글로벌 설정이 로드되면 로컬 상태에 적용
   useEffect(() => {
     if (!globalLoading && globalSettings) {
-      // 서버 URL로 베타 환경 여부 결정 (실제 URL은 비공개)
-      setIsBetaEnv(globalSettings.isBetaEnv === true);
-
       // 모든 필드에 기본값을 설정하여 undefined 방지
       setSettings({
         projectId: String(globalSettings.projectId || ''),
@@ -153,8 +126,7 @@ function Settings(): JSX.Element {
         s3Bucket: String(globalSettings.s3Bucket || ''),
         serverUrl: String(globalSettings.serverUrl || ''),
         endpointUrl: String(globalSettings.endpointUrl || ''),
-        cdnUrl: String(globalSettings.cdnUrl || ''),
-        gamepotRegion: String(globalSettings.gamepotRegion || 'ap-northeast-2')
+        cdnUrl: String(globalSettings.cdnUrl || '')
       });
 
       // S3 설정 정보가 있으면 S3 설정 섹션 표시
@@ -185,29 +157,13 @@ function Settings(): JSX.Element {
     }))
   }
 
-  // 환경 변경 핸들러
-  const handleEnvironmentChange = (isChecked: boolean) => {
-    setIsBetaEnv(isChecked);
-  };
-
-  // 리전 변경 핸들러 - 게임팟 리전만 변경하고 AWS 리전은 자동 설정하지 않음
-  const handleRegionChange = (value: string) => {
-    setSettings(prev => ({
-      ...prev,
-      gamepotRegion: value
-    }));
-  };
-
   // 설정 저장 함수
   const saveSettings = async () => {
     try {
       setLoading(true)
 
-      // isBetaEnv 값도 함께 저장 (Settings 타입으로 명시적 캐스팅)
-      const settingsToSave: Settings = {
+      const settingsToSave: AppSettings = {
         ...settings,
-        isBetaEnv,
-        gamepotRegion: settings.gamepotRegion || 'ap-northeast-2'
       };
 
       // 글로벌 설정 저장
@@ -216,6 +172,9 @@ function Settings(): JSX.Element {
       if (!success) {
         throw new Error('설정 저장 중 오류가 발생했습니다')
       }
+
+      // 설정 변경 이벤트 발생
+      window.dispatchEvent(new CustomEvent('settings-updated', { detail: settingsToSave }));
 
       toast({
         title: '설정 저장 완료',
@@ -244,13 +203,11 @@ function Settings(): JSX.Element {
         return
       }
 
+      // 1. 저장된 설정 로드
       const savedSettings = await window.api.loadSettings()
 
       if (savedSettings) {
-        // 베타 환경 설정
-        setIsBetaEnv(savedSettings.isBetaEnv === true);
-
-        // 모든 필드에 기본값 설정하여 undefined 방지
+        // 모든 필드에 기본값을 설정하여 undefined 방지
         setSettings({
           projectId: String(savedSettings.projectId || ''),
           apiKey: String(savedSettings.apiKey || ''),
@@ -260,8 +217,7 @@ function Settings(): JSX.Element {
           s3Bucket: String(savedSettings.s3Bucket || ''),
           serverUrl: String(savedSettings.serverUrl || ''),
           endpointUrl: String(savedSettings.endpointUrl || ''),
-          cdnUrl: String(savedSettings.cdnUrl || ''),
-          gamepotRegion: String(savedSettings.gamepotRegion || 'ap-northeast-2')
+          cdnUrl: String(savedSettings.cdnUrl || '')
         });
 
         // S3 설정 정보가 있으면 S3 설정 섹션 표시
@@ -303,33 +259,6 @@ function Settings(): JSX.Element {
               <CardDescription className="text-xs">Configure API access for plugin management.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* 환경 설정 스위치 */}
-              <ToggleSwitch
-                checked={isBetaEnv}
-                onChange={handleEnvironmentChange}
-                label={isBetaEnv ? "Beta Environment" : "Real Environment"}
-                description="Select the environment you want to use."
-              />
-
-              {/* 게임팟 리전 선택 */}
-              <div className="mt-4">
-                <Label htmlFor="gamepotRegion" className="text-xs mb-1 block">Region (GAMEPOT)</Label>
-                <Select
-                  value={settings.gamepotRegion}
-                  onValueChange={handleRegionChange}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder="리전을 선택하세요" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {regionOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value} className="text-xs">
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
                 <div>
@@ -437,6 +366,7 @@ function Settings(): JSX.Element {
                   </div>
                 </div>
               )}
+
             </CardContent>
             <CardFooter className="flex justify-end">
               <Button

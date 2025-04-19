@@ -55,7 +55,7 @@ function DesignEditor(): JSX.Element {
   // Fetch environments from API
   const fetchEnvironments = async () => {
     try {
-      const environments = await apiService.fetchEnvironments();
+      const environments = await apiService.getEnvironments();
       setEnvironments(environments);
 
       // Set current environment if available
@@ -63,7 +63,6 @@ function DesignEditor(): JSX.Element {
         const currentEnv = environments[0];
         setCurrentEnvironment(currentEnv);
         setTheme(currentEnv.data);
-
         // 오브젝트 스토리지에서 이미지 가져오기
         if (currentEnv.data.backgroundImage) {
           if (currentEnv.data.backgroundImage.startsWith('data:')) {
@@ -82,7 +81,6 @@ function DesignEditor(): JSX.Element {
                 const baseUrl = settings.cdnUrl || s3Config.endpointUrl;
                 imageUrl = `${baseUrl}${imageUrl}`;
               }
-
               // 이미지를 Fetch API로 가져와서 blob으로 변환
               const response = await fetch(imageUrl, { mode: 'no-cors' });
               const blob = await response.blob();
@@ -112,6 +110,8 @@ function DesignEditor(): JSX.Element {
 
         // Update preview styles after setting the theme
         updatePreviewStyles(currentEnv.data);
+      } else {
+        console.error('No environments found');
       }
     } catch (error) {
       console.error('Error fetching environments:', error);
@@ -414,8 +414,10 @@ function DesignEditor(): JSX.Element {
           colors: theme.colors,
           backgroundImage: backgroundImageUrl,
           titleColor: theme.titleColor
-        }
+        },
+        cdnUrl: settings.cdnUrl
       };
+
 
       // If editing existing environment, include its ID
       if (currentEnvironment?.id) {

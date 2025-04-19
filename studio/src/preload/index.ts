@@ -165,6 +165,11 @@ const api = {
   // 업데이트 체크 요청
   checkForUpdates: (): Promise<void> => {
     return ipcRenderer.invoke('check-for-updates');
+  },
+
+  // env.local 파일에서 환경 변수 로드
+  loadEnvLocal: (): Promise<Record<string, string>> => {
+    return ipcRenderer.invoke('load-env-local');
   }
 }
 

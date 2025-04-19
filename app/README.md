@@ -214,3 +214,61 @@ module.exports = {
   }
 }
 ```
+
+## 빌드 및 배포
+
+### 필수 요구사항
+
+- [Node.js](https://nodejs.org/) 16.x 이상
+- [pnpm](https://pnpm.io/) 8.x 이상
+- macOS 빌드의 경우 Apple Developer ID
+- Windows 빌드의 경우 Windows 환경
+
+### 의존성 설치
+
+```bash
+pnpm install
+```
+
+### 인스톨러 빌드
+
+#### Windows 인스톨러
+
+```bash
+pnpm run build:win-installer
+```
+
+#### macOS 인스톨러
+
+서명되지 않은 버전 (개발용):
+```bash
+pnpm run build:mac-installer
+```
+
+서명된 버전 (배포용):
+```bash
+pnpm run build:mac-installer-signed
+```
+
+#### Linux 인스톨러
+
+```bash
+pnpm run build:linux-installer
+```
+
+### macOS 앱 인증 설정
+
+macOS 앱 인증을 위해서는 다음 환경 변수를 설정해야 합니다:
+
+```bash
+export APPLE_ID="your.apple.id@example.com"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx" # Apple ID 앱 특정 비밀번호
+export APPLE_TEAM_ID="XXXXXXXXXX" # Apple Developer 팀 ID
+```
+
+1. Apple Developer 계정 필요 (연 $99)
+2. Apple Developer 사이트에서 인증서 생성 필요
+3. 앱 특정 비밀번호 생성: [Apple ID 관리 페이지](https://appleid.apple.com/)
+4. 팀 ID 확인: [Apple Developer 계정](https://developer.apple.com/account) > Membership
+
+자세한 내용은 [electron-builder 문서](https://www.electron.build/code-signing)를 참조하세요.

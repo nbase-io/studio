@@ -59,7 +59,7 @@ export default function FileUploader({
         </div>
       </div>
 
-      {/* 선택된 파일 목록 */}
+      {/* Selected files list */}
       {uploadedFiles.length > 0 && (
         <div className="mb-4">
           <div className="text-xs font-medium mb-2">Selected Files ({uploadedFiles.length})</div>
@@ -76,7 +76,7 @@ export default function FileUploader({
                   </div>
                 </div>
 
-                {/* 업로드 진행률 */}
+                {/* Upload progress */}
                 {uploadProgress[file.name] && uploadProgress[file.name] > 0 ? (
                   <div className="w-24 bg-gray-200 rounded-full h-1.5 overflow-hidden">
                     <div
@@ -99,7 +99,7 @@ export default function FileUploader({
         </div>
       )}
 
-      {/* 기존 파일 목록 - 삭제 기능 포함 */}
+      {/* Existing files list - with delete functionality */}
       {versionFiles && versionFiles.length > 0 && (
         <div className="mb-4">
           <div className="text-xs font-medium mb-2">Current Files ({versionFiles.length})</div>
