@@ -102,13 +102,14 @@ export class ApiService {
   private projectId: string;
   private apiKey: string;
   private cdnUrl: string;
-
+  private betaEnv: boolean;
   constructor() {
     // Default values, will be updated when loadSettings is called
     this.baseUrl = 'https://plugin.gamepot.ntruss.com';
     this.projectId = '';
     this.apiKey = '';
     this.cdnUrl = '';
+    this.betaEnv = false;
 
     // Load settings when initialized
     this.loadSettings();
@@ -122,10 +123,15 @@ export class ApiService {
     if (settingsStr) {
       try {
         const settings = JSON.parse(settingsStr);
-        this.baseUrl = settings.serverUrl || this.baseUrl;
+        if(settings.isBetaEnv) {
+          this.baseUrl = 'https://dev-plugin.gamepot.io'
+        } else {
+          this.baseUrl = 'https://plugin.gamepot.ntruss.com';
+        }
         this.projectId = settings.projectId || '';
         this.apiKey = settings.apiKey || '';
         this.cdnUrl = settings.cdnUrl || '';
+        this.betaEnv = settings.isBetaEnv || false;
         console.log('API settings loaded:', {
           serverUrl: this.baseUrl,
           cdnUrl: this.cdnUrl
@@ -217,7 +223,8 @@ export class ApiService {
   ): Promise<T> {
     this.loadSettings(); // Reload settings to ensure we have the latest
 
-    const url = this.getUrl(endpoint);
+    const url = this.getUrl(endpoint,);
+    console.log(url)
     console.log(`API request: ${method} ${url}`);
 
     // 캐시 방지를 위한 헤더 추가

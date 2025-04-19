@@ -58,11 +58,11 @@ interface AppSettings {
 
 // 리전 정보 정의
 const regionOptions = [
-  { value: 'ap-northeast-2', label: 'Korea (Seoul)', awsCode: 'ap-northeast-2' },
-  { value: 'ap-northeast-1', label: 'Japan (Tokyo)', awsCode: 'ap-northeast-1' },
-  { value: 'ap-southeast-1', label: 'Singapore', awsCode: 'ap-southeast-1' },
-  { value: 'us-east-1', label: 'USA (N. Virginia)', awsCode: 'us-east-1' },
-  { value: 'eu-central-1', label: 'Germany (Frankfurt)', awsCode: 'eu-central-1' }
+  { value: 'kr', label: 'Korea (Seoul)' },
+  { value: 'jp', label: 'Japan (Tokyo)' },
+  { value: 'sg', label: 'Singapore' },
+  { value: 'us', label: 'USA (N. Virginia)' },
+  { value: 'eu', label: 'Germany (Frankfurt)' }
 ];
 
 // CSS로 스위치 컴포넌트 구현 (Radix UI를 사용하지 않는 간단한 버전)

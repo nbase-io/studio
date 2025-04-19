@@ -186,25 +186,7 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
     <div className="bg-white white:bg-gray-900 border-b border-gray-200 white:border-gray-800">
       <div className="p-2 flex justify-between items-center bg-white white:bg-gray-900">
         <div className="flex items-center space-x-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 hover:bg-blue-50 white:hover:bg-gray-800"
-            onClick={onRefresh}
-          >
-            <RefreshCw className="h-3.5 w-3.5 mr-2 text-blue-500 white:text-blue-400" />
-            <span className="text-xs">Refresh</span>
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 hover:bg-blue-50 white:hover:bg-gray-800"
-            onClick={onNavigateUp}
-            title="Parent Folder"
-          >
-            <FolderUp className="h-3.5 w-3.5 text-blue-500 white:text-blue-400" />
-          </Button>
+          <h1 className="text-xl font-bold">File Manager</h1>
         </div>
 
         <div className="flex items-center space-x-2">
@@ -231,24 +213,39 @@ const FileToolbar: React.FC<FileToolbarProps> = ({
           <Button
             variant="default"
             size="sm"
-            className="h-8 bg-blue-500 hover:bg-blue-600 text-white"
             onClick={onUpload}
             disabled={uploading}
           >
             <Upload className="h-3.5 w-3.5 mr-2" />
             <span className="text-xs">Upload</span>
           </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onRefresh}
+          >
+            <RefreshCw />
+          </Button>
+
 
           {/* 새폴더 생성 버튼 */}
           <Button
             variant="outline"
-            size="sm"
-            className="h-8 text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300 white:text-blue-400"
+            size="icon"
             onClick={onCreateFolder}
             disabled={!onCreateFolder}
           >
-            <FolderPlus className="h-3.5 w-3.5 mr-1" />
-            <span className="text-[8px]">New</span>
+            <FolderPlus />
+
+          </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onNavigateUp}
+            title="Parent Folder"
+          >
+            <FolderUp  />
           </Button>
 
           {/* 이름 변경 버튼 */}

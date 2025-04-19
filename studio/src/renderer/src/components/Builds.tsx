@@ -114,6 +114,18 @@ function Builds(): JSX.Element {
   // 강제 리렌더링을 위한 키 값
   const [buildListKey, setBuildListKey] = useState<number>(0);
 
+
+  // 에러 다이얼로그 상태
+  const [errorDialogOpen, setErrorDialogOpen] = useState<boolean>(false);
+  const [errorLogs, setErrorLogs] = useState<string[]>([]);
+  const [errorTitle, setErrorTitle] = useState<string>("");
+
+  // 에러 로그 다이얼로그 표시 함수
+  const showErrorDialog = (title: string, message: string) => {
+    setErrorTitle(title);
+    setErrorLogs(prev => [...prev, `${new Date().toLocaleString()}: ${message}`]);
+    setErrorDialogOpen(true);
+  };
   // Validate all form fields when values change
   useEffect(() => {
     if (!showAddBuildDialog) return;
@@ -323,7 +335,8 @@ function Builds(): JSX.Element {
       // API connection test
       const isConnected = await checkServerConnection();
       if (!isConnected) {
-        setError('Failed to connect to API server. Check server settings.');
+        showErrorDialog('Error','Failed to connect to API server. Check server settings.');
+        // 탭을 환경 설정으로 이동
         setLoading(false);
         return;
       }
@@ -732,28 +745,7 @@ function Builds(): JSX.Element {
 
   // Add a log to debug panel
   const addDebugLog = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
-    setDebugLogs(prev => [
-      {
-        timestamp: new Date(),
-        message,
-        type
-      },
-      ...prev.slice(0, 99) // Keep only the last 100 logs
-    ])
-  }
-
-  // Clear debug logs
-  const clearDebugLogs = () => {
-    setDebugLogs([])
-    addDebugLog('Debug logs cleared')
-  }
-
-  // Toggle debug panel
-  const toggleDebugPanel = () => {
-    setShowDebugPanel(prev => !prev)
-    if (!showDebugPanel) {
-      addDebugLog('Debug panel opened')
-    }
+    console.log(message, type)
   }
 
   // Reset form state to default values
@@ -1235,7 +1227,6 @@ function Builds(): JSX.Element {
               <Button
                 onClick={() => setShowAddBuildDialog(true)}
                 size="sm"
-                className="h-8 text-xs"
               >
                 <Plus className="h-3 w-3 mr-1" />
                 Add Build
@@ -1262,7 +1253,44 @@ function Builds(): JSX.Element {
           </ScrollArea>
         </>
       )}
+         {/* 에러 로그 다이얼로그 */}
+         <Dialog open={errorDialogOpen} onOpenChange={() => setErrorDialogOpen(false)}>
+        <DialogContent className="sm:max-w-md md:max-w-lg lg:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{errorTitle || 'Error Occurred'}</DialogTitle>
+            <DialogDescription>
+              An error occurred while loading files. Detailed logs are below.
+            </DialogDescription>
+          </DialogHeader>
 
+          <div className="mt-4 space-y-4">
+            <div className="border rounded-md bg-gray-50">
+              <ScrollArea className="h-60">
+                <div className="p-4 space-y-2 font-mono text-sm">
+                  {errorLogs.length === 0 ? (
+                    <p className="text-gray-500 italic">No logs available.</p>
+                  ) : (
+                    errorLogs.map((log, index) => (
+                      <div key={index} className="border-b border-gray-200 pb-2 last:border-0">
+                        {log}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => setErrorDialogOpen(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Add Build Dialog - 빌드 추가 다이얼로그 */}
       <Dialog open={showAddBuildDialog} onOpenChange={(open) => {
         if (!open) resetFormState();

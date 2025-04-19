@@ -295,7 +295,7 @@ function createWindow(): void {
     mainWindow.show();
 
     // Auto open developer tools
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools();
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

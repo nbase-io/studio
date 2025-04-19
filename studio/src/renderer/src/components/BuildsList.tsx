@@ -174,7 +174,8 @@ const BuildsList: React.FC<BuildsListProps> = ({
               </div>
 
               <Button
-                className="w-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center rounded-sm h-8 text-xs"
+                className="w-full"
+                size="sm"
                 onClick={(e) => handleDownload(e, build.download_url)}
                 disabled={!build.download_url}
               >
