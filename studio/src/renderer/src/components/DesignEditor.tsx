@@ -20,13 +20,6 @@ interface ThemeColors {
   border: string
 }
 
-interface S3Config {
-  bucket: string
-  region: string
-  accessKeyId: string
-  secretAccessKey: string
-}
-
 // defaultTheme 정의 추가
 const defaultTheme: ThemeConfig = {
   colors: {
@@ -132,8 +125,6 @@ function DesignEditor(): JSX.Element {
 
   // Initial CDN URL loading
   useEffect(() => {
-
-    // 설정에서 로그인 정보 가져오기
 
     fetchEnvironments(); // Load saved environments on component mount
   }, []);
@@ -431,9 +422,6 @@ function DesignEditor(): JSX.Element {
         environment.id = currentEnvironment.id;
       }
 
-      const jsonStr = JSON.stringify(environment, null, 2);
-      setJsonOutput(jsonStr);
-
       // API를 통해 환경 설정 저장
       const savedEnvironment = await apiService.saveEnvironment(environment);
 
@@ -448,8 +436,6 @@ function DesignEditor(): JSX.Element {
         title: 'Environment Saved',
         description: 'Your environment settings have been saved successfully.',
       });
-
-      setShowJsonDialog(true);
 
       // Clear selected file and preview after save
       if (selectedFile) {
@@ -543,7 +529,7 @@ function DesignEditor(): JSX.Element {
                         ...buttonStyle,
                         width: '150px',
                         height: '60px',
-                        backgroundColor: '#0e1525',
+                        backgroundColor: theme.colors.primary,
                         color: '#fff',
                         fontWeight: 'bold'
                       }}
@@ -648,39 +634,6 @@ function DesignEditor(): JSX.Element {
           'Save Changes'
         )}
       </Button>
-
-      {/* JSON output dialog */}
-      <Dialog open={showJsonDialog} onOpenChange={setShowJsonDialog}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Environment Settings JSON</DialogTitle>
-            <DialogDescription className="text-[10px]">
-              The JSON below has been saved to the server via API.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="bg-gray-800 p-4 rounded-md overflow-auto text-white">
-            <pre className="text-[10px] whitespace-pre-wrap">
-              {jsonOutput}
-            </pre>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => {
-                navigator.clipboard.writeText(jsonOutput);
-                const button = document.activeElement as HTMLButtonElement;
-                const originalText = button.textContent;
-                button.textContent = 'Copied to clipboard!';
-                setTimeout(() => {
-                  button.textContent = originalText;
-                }, 2000);
-              }}
-              className="text-xs"
-            >
-              Copy to Clipboard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Image upload dialog */}
       <Dialog open={showImageUploadDialog} onOpenChange={setShowImageUploadDialog}>

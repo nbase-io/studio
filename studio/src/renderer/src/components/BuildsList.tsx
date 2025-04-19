@@ -153,14 +153,7 @@ const BuildsList: React.FC<BuildsListProps> = ({
                   {build.name}
                 </h3>
                 <div className="flex space-x-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-gray-400 hover:text-red-600 p-0 h-5 w-5"
-                    onClick={(e) => handleDeleteClick(build.id, e)}
-                  >
-                    <Trash className="h-3.5 w-3.5" />
-                  </Button>
+
                   <Button
                     variant="ghost"
                     size="sm"
@@ -190,7 +183,7 @@ const BuildsList: React.FC<BuildsListProps> = ({
               </Button>
 
               <div className="text-gray-700 text-xs font-medium text-center mb-2">
-                {build.size ? `${build.size} MB` : '0 MB'}
+                {/* {build.size ? `${build.size} MB` : '0 MB'} */}
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs">
